@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
 let pyProc = null;
 
@@ -24,8 +25,12 @@ function startPythonApi() {
     stdio: "inherit",
   });
 }
+e.log("[updater] error", err));
+}
 
 app.whenReady().then(() => {
+  wireAutoUpdates();
+  autoUpdater.checkForUpdatesAndNotify();
   startPythonApi();
   createWindow();
 });
