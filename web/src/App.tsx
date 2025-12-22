@@ -1,265 +1,188 @@
 import React, { useMemo, useState } from "react";
 
-type PackageKey = "helpgrid" | "maxweb";
-
-type RunResponse = {
-  run_id: string;
-  engine: { dashboard_data: string; dev_queue: string };
-  reports: string;
-};
-
-type TaskStatus = "COMPLETED" | "IN_PROGRESS" | "PENDING";
-
-type CloseTask = {
+type Row = {
   id: string;
-  entity: string;
-  category: "Merchant" | "Balance Sheet";
-  name: string;
-  assignee: string;
-  dueDate: string;
-  status: TaskStatus;
-  exceptionsOpen: number;
-  assignedTeam?: "Accounting" | "Dev Team";
-  lastRun?: string;
-};
-
-type DevIssue = {
-  exception_id: string;
-  entity: string;
-  period: string;
-  issue_code: string;
-  severity: "Low" | "Medium" | "High";
-  status: string;
-  message: string;
-  amount?: number | null;
-  reference?: string | null;
-  updated_at?: string;
+  merchant: string;
+  erp: string;
+  status: "Matched" | "Needs Review" | "Merchant-only" | "ERP-only";
+  amount: number;
+  date: string;
 };
 
 export default function App() {
-  const [apiBase, setApiBase] = useState<string>(() => {
-    // change to ngrok url for sharing
-    return "http://localhost:8000";
-  });
-  const [pkg, setPkg] = useState<PackageKey>("helpgrid");
+  const [query, setQuery] = useState("");
 
-  const [merchantFiles, setMerchantFiles] = useState<File[]>([]);
-  const [erpFiles, setErpFiles] = useState<File[]>([]);
-  const [bankFiles, setBankFiles] = useState<File[]>([]);
+  const rows: Row[] = useMemo(
+    () => [
+      { id: "TX-1001", merchant: "PayPal", erp: "QuickBooks", status: "Matched", amount: 1250.0, date: "2025-12-20" },
+      { id: "TX-1002", merchant: "Braintree", erp: "NetSuite", status: "Needs Review", amount: 349.99, date: "2025-12-20" },
+      { id: "TX-1003", merchant: "PayPal", erp: "", status: "Merchant-only", amount: 79.0, date: "2025-12-21" },
+      { id: "TX-1004", merchant: "", erp: "QuickBooks", status: "ERP-only", amount: 615.5, date: "2025-12-21" },
+    ],
+    []
+  );
 
-  const [settlementLagDays, setSettlementLagDays] = useState<number>(2);
-  const [lookbackDays, setLookbackDays] = useState<number>(21);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.id.toLowerCase().includes(q) ||
+        r.merchant.toLowerCase().includes(q) ||
+        r.erp.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q)
+    );
+  }, [query, rows]);
 
-  const [running, setRunning] = useState(false);
-  const [runId, setRunId] = useState<string | null>(null);
-
-  const [tasks, setTasks] = useState<CloseTask[] | null>(null);
-  const [issues, setIssues] = useState<DevIssue[] | null>(null);
-  const [reports, setReports] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  async function runRecon() {
-    setRunning(true);
-    setError(null);
-    try {
-      const form = new FormData();
-      form.append("package", pkg);
-      form.append("settlement_lag_days", String(settlementLagDays));
-      form.append("lookback_days", String(lookbackDays));
-      merchantFiles.forEach((f) => form.append("merchant_files", f));
-      erpFiles.forEach((f) => form.append("erp_files", f));
-      bankFiles.forEach((f) => form.append("bank_files", f));
-
-      const res = await fetch(`${apiBase}/api/merchant/run`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(`Run failed (HTTP ${res.status})`);
-      const json = (await res.json()) as RunResponse;
-      setRunId(json.run_id);
-
-      const dashRes = await fetch(`${apiBase}${json.engine.dashboard_data}`, { cache: "no-store" });
-      const devRes = await fetch(`${apiBase}${json.engine.dev_queue}`, { cache: "no-store" });
-      const dashJson = await dashRes.json();
-      const devJson = await devRes.json();
-
-      setTasks(Array.isArray(dashJson?.tasks) ? (dashJson.tasks as CloseTask[]) : []);
-      setIssues(Array.isArray(devJson?.issues) ? (devJson.issues as DevIssue[]) : []);
-
-      const repRes = await fetch(`${apiBase}${json.reports}`, { cache: "no-store" });
-      const repJson = await repRes.json();
-      setReports(Array.isArray(repJson) ? repJson : []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to run");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  const taskSummary = useMemo(() => {
-    const t = tasks || [];
-    const open = t.reduce((acc, x) => acc + (x.exceptionsOpen || 0), 0);
-    return { count: t.length, open };
-  }, [tasks]);
+  const counts = useMemo(() => {
+    const c = { Matched: 0, "Needs Review": 0, "Merchant-only": 0, "ERP-only": 0 } as Record<Row["status"], number>;
+    rows.forEach((r) => (c[r.status] += 1));
+    return c;
+  }, [rows]);
 
   return (
-    <div style={{ fontFamily: "ui-sans-serif, system-ui", padding: 24, maxWidth: 980, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>Yomali Close — Live Demo</div>
-          <div style={{ color: "#555", marginTop: 4 }}>
-            Per-package Merchant reconciliation: Helpgrid vs MaxWeb (uploads → API → engine JSON → dashboard)
+    <div style={{ fontFamily: "system-ui, Segoe UI, Arial", background: "#f6f7fb", minHeight: "100vh" }}>
+      {/* Header */}
+      <div style={{ background: "white", borderBottom: "1px solid #e6e8ef" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "18px 18px", display: "flex", alignItems: "center", gap: 14 }}>
+          <img
+            src="/stalliant.png"
+            alt="Stalliant"
+            style={{ height: 34, width: "auto", display: "block" }}
+          />
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 0.2 }}>Stalliant Live</div>
+            <div style={{ fontSize: 12, color: "#667085" }}>
+              Desktop demo — reconciliation dashboard (sample data)
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto" }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search (txn, merchant, ERP, status)…"
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #d7dbe7",
+                width: 320,
+                outline: "none",
+              }}
+            />
           </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 18, padding: 16, border: "1px solid #ddd", borderRadius: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label style={{ display: "block" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>API Base URL</div>
-            <input
-              value={apiBase}
-              onChange={(e) => setApiBase(e.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
-              placeholder="http://localhost:8000"
-            />
-          </label>
-
-          <label style={{ display: "block" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Package</div>
-            <select
-              value={pkg}
-              onChange={(e) => setPkg(e.target.value as PackageKey)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
-            >
-              <option value="helpgrid">Helpgrid</option>
-              <option value="maxweb">MaxWeb</option>
-            </select>
-          </label>
-
-          <label style={{ display: "block" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Settlement lag days</div>
-            <input
-              type="number"
-              value={settlementLagDays}
-              onChange={(e) => setSettlementLagDays(Number(e.target.value || 0))}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
-            />
-          </label>
-
-          <label style={{ display: "block" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Lookback days</div>
-            <input
-              type="number"
-              value={lookbackDays}
-              onChange={(e) => setLookbackDays(Number(e.target.value || 0))}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
-            />
-          </label>
+      {/* Body */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 18 }}>
+        {/* KPI cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          <Kpi title="Matched" value={counts["Matched"]} />
+          <Kpi title="Needs Review" value={counts["Needs Review"]} />
+          <Kpi title="Merchant-only" value={counts["Merchant-only"]} />
+          <Kpi title="ERP-only" value={counts["ERP-only"]} />
         </div>
 
-        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <label>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Merchant files</div>
-            <input type="file" multiple onChange={(e) => setMerchantFiles(Array.from(e.target.files || []))} />
-            <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>{merchantFiles.length} selected</div>
-          </label>
-
-          <label>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>ERP files</div>
-            <input type="file" multiple onChange={(e) => setErpFiles(Array.from(e.target.files || []))} />
-            <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>{erpFiles.length} selected</div>
-          </label>
-
-          <label>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Bank files</div>
-            <input type="file" multiple onChange={(e) => setBankFiles(Array.from(e.target.files || []))} />
-            <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>{bankFiles.length} selected</div>
-          </label>
-        </div>
-
-        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center" }}>
-          <button
-            onClick={runRecon}
-            disabled={running}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 12,
-              border: "1px solid #222",
-              background: running ? "#eee" : "#111",
-              color: running ? "#333" : "white",
-              cursor: running ? "default" : "pointer",
-              fontWeight: 600,
-            }}
-          >
-            {running ? "Running..." : "Run Reconciliation"}
-          </button>
-
-          {runId ? <span style={{ color: "#555" }}>Run: <b>{runId}</b></span> : null}
-          {error ? <span style={{ color: "crimson" }}>{error}</span> : null}
-        </div>
-      </div>
-
-      <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Tasks</div>
-          <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
-            {tasks ? `${taskSummary.count} tasks • ${taskSummary.open} open exceptions` : "No run yet"}
+        {/* Table */}
+        <div style={{ marginTop: 14, background: "white", border: "1px solid #e6e8ef", borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid #eef0f6", display: "flex", alignItems: "center" }}>
+            <div style={{ fontWeight: 700 }}>Exceptions & Matches</div>
+            <div style={{ marginLeft: "auto", color: "#667085", fontSize: 12 }}>
+              Showing {filtered.length} of {rows.length}
+            </div>
           </div>
-          <div style={{ marginTop: 10 }}>
-            {(tasks || []).map((t) => (
-              <div key={t.id} style={{ padding: 10, border: "1px solid #eee", borderRadius: 10, marginBottom: 8 }}>
-                <div style={{ fontWeight: 650 }}>{t.name}</div>
-                <div style={{ color: "#666", fontSize: 12, marginTop: 2 }}>
-                  Entity: {t.entity} • Status: {t.status} • Open exceptions: {t.exceptionsOpen}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Dev Queue</div>
-          <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
-            {issues ? `${issues.length} items` : "No run yet"}
-          </div>
-          <div style={{ marginTop: 10 }}>
-            {(issues || []).map((i) => (
-              <div key={i.exception_id} style={{ padding: 10, border: "1px solid #eee", borderRadius: 10, marginBottom: 8 }}>
-                <div style={{ fontWeight: 650 }}>{i.exception_id} • {i.severity}</div>
-                <div style={{ color: "#666", fontSize: 12, marginTop: 2 }}>
-                  {i.entity} • {i.issue_code} • {i.status}
-                </div>
-                <div style={{ marginTop: 6 }}>{i.message}</div>
-                {i.reference ? <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>Ref: {i.reference}</div> : null}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 14, border: "1px solid #ddd", borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 16, fontWeight: 700 }}>Reports</div>
-        <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
-          Downloads served by API for this run.
-        </div>
-        <div style={{ marginTop: 10 }}>
-          {reports.length ? (
-            <ul>
-              {reports.map((r) => (
-                <li key={r}>
-                  <a href={`${apiBase}/api/runs/${runId}/reports/${r}`} target="_blank" rel="noreferrer">
-                    {r}
-                  </a>
-                </li>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", background: "#fbfcff" }}>
+                <Th>Txn</Th>
+                <Th>Date</Th>
+                <Th>Merchant</Th>
+                <Th>ERP</Th>
+                <Th>Status</Th>
+                <Th style={{ textAlign: "right" }}>Amount</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id} style={{ borderTop: "1px solid #eef0f6" }}>
+                  <Td>{r.id}</Td>
+                  <Td>{r.date}</Td>
+                  <Td>{r.merchant || <span style={{ color: "#98a2b3" }}>—</span>}</Td>
+                  <Td>{r.erp || <span style={{ color: "#98a2b3" }}>—</span>}</Td>
+                  <Td>
+                    <Badge status={r.status} />
+                  </Td>
+                  <Td style={{ textAlign: "right" }}>${r.amount.toFixed(2)}</Td>
+                </tr>
               ))}
-            </ul>
-          ) : (
-            <div style={{ color: "#666" }}>No reports yet.</div>
-          )}
+              {filtered.length === 0 && (
+                <tr>
+                  <Td colSpan={6} style={{ padding: 18, color: "#667085" }}>
+                    No results.
+                  </Td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      </div>
 
-      <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
-        Note: This is a minimal “live demo” harness. Once you plug your real recon engines into the API, the dashboard will display the real output.
+        <div style={{ marginTop: 10, color: "#667085", fontSize: 12 }}>
+          Tip: updates will be checked at launch (packaged builds) and delivered via GitHub Releases.
+        </div>
       </div>
     </div>
+  );
+}
+
+function Kpi({ title, value }: { title: string; value: number }) {
+  return (
+    <div style={{ background: "white", border: "1px solid #e6e8ef", borderRadius: 14, padding: 14 }}>
+      <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 26, fontWeight: 800 }}>{value}</div>
+    </div>
+  );
+}
+
+function Th({ children, style }: React.PropsWithChildren<{ style?: React.CSSProperties }>) {
+  return (
+    <th style={{ padding: "10px 12px", fontSize: 12, color: "#667085", fontWeight: 700, ...style }}>
+      {children}
+    </th>
+  );
+}
+
+function Td({ children, style, colSpan }: React.PropsWithChildren<{ style?: React.CSSProperties; colSpan?: number }>) {
+  return (
+    <td style={{ padding: "12px 12px", fontSize: 13, ...style }} colSpan={colSpan}>
+      {children}
+    </td>
+  );
+}
+
+function Badge({ status }: { status: Row["status"] }) {
+  const map: Record<Row["status"], { bg: string; fg: string; border: string }> = {
+    Matched: { bg: "#ecfdf3", fg: "#027a48", border: "#a6f4c5" },
+    "Needs Review": { bg: "#fffaeb", fg: "#b54708", border: "#fedf89" },
+    "Merchant-only": { bg: "#f0f9ff", fg: "#026aa2", border: "#b9e6fe" },
+    "ERP-only": { bg: "#fdf2fa", fg: "#c11574", border: "#fcceee" },
+  };
+
+  const s = map[status];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "4px 10px",
+        borderRadius: 999,
+        background: s.bg,
+        color: s.fg,
+        border: `1px solid ${s.border}`,
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    >
+      {status}
+    </span>
   );
 }
