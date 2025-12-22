@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "period": "2025-10",
+    "generated_at": "2025-12-19 17:51:38 UTC"
+  },
+  "issues": [
+    {
+      "exception_id": "ex-helpgrid-001",
+      "entity": "Helpgrid",
+      "period": "2025-10",
+      "template": "merchant_gateway",
+      "issue_code": "AMOUNT_MISMATCH",
+      "severity": "High",
+      "assigned_team": "Dev Team",
+      "status": "New",
+      "message": "Settlement differs from ERP clearing. (demo)",
+      "amount": 125.43,
+      "reference": "Batch 88421",
+      "notes_accounting": "Please review fee mapping.",
+      "notes_dev": "",
+      "updated_at": "2025-12-19 17:51:38 UTC"
+    }
+  ]
+}

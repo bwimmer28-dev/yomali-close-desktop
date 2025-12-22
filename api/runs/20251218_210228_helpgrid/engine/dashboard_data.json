@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "period": "2025-10",
+    "generated_at": "2025-12-18 21:02:28 UTC",
+    "entities": [
+      "helpgrid"
+    ]
+  },
+  "tasks": [
+    {
+      "id": "m-helpgrid-run",
+      "entity": "Helpgrid",
+      "category": "Merchant",
+      "name": "Helpgrid Merchant Reconciliation",
+      "assignee": "Accounting",
+      "dueDate": "2025-11-05",
+      "status": "IN_PROGRESS",
+      "exceptionsOpen": 2,
+      "assignedTeam": "Dev Team",
+      "lastRun": "2025-12-18 21:02:28 UTC"
+    }
+  ]
+}

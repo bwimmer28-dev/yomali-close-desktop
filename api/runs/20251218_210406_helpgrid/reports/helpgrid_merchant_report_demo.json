@@ -1,0 +1,7 @@
+{
+  "package": "helpgrid",
+  "generated_at": "2025-12-18 21:04:06 UTC",
+  "lookback_days": 21,
+  "settlement_lag_days": 2,
+  "notes": "Demo report. Replace with GAAP-compliant report output."
+}
