@@ -24,6 +24,16 @@
     ],
     "win": {
       "target": "nsis"
-    }
+    }, 
+   "publish": [
+  {
+    "provider": "github",
+    "owner": "bwimmer28-dev",
+    "repo": "yomali-close-desktop"
+  }
+]
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   }
 }
