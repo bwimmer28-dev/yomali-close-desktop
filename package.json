@@ -1,6 +1,6 @@
 {
   "name": "yomali-close-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
