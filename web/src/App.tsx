@@ -1,188 +1,421 @@
 import React, { useMemo, useState } from "react";
+import stalliantLogo from "./assets/stalliant.png";
 
-type Row = {
-  id: string;
-  merchant: string;
-  erp: string;
-  status: "Matched" | "Needs Review" | "Merchant-only" | "ERP-only";
-  amount: number;
-  date: string;
-};
+type TabKey =
+  | "dashboard"
+  | "balanceSheet"
+  | "merchantRecon"
+  | "help"
+  | "settings";
+
+const ENTITIES = [
+  "ClickCRM",
+  "Helpgrid Inc",
+  "Maxweb Inc",
+  "GetPayment",
+  "SmartFluent",
+  "Yomali Holdings",
+  "Yomali Labs",
+];
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      checkForUpdates?: () => Promise<boolean>;
+      installUpdate?: () => Promise<boolean>;
+    };
+  }
+}
 
 export default function App() {
-  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<TabKey>("dashboard");
 
-  const rows: Row[] = useMemo(
+  // Settings (persist later if you want via localStorage)
+  const [merchantOutPath, setMerchantOutPath] = useState(
+    "C:\\StalliantLive\\Output\\Merchant Reconciliations"
+  );
+  const [balanceOutPath, setBalanceOutPath] = useState(
+    "C:\\StalliantLive\\Output\\Balance Sheet Reconciliations"
+  );
+
+  const tabs = useMemo(
     () => [
-      { id: "TX-1001", merchant: "PayPal", erp: "QuickBooks", status: "Matched", amount: 1250.0, date: "2025-12-20" },
-      { id: "TX-1002", merchant: "Braintree", erp: "NetSuite", status: "Needs Review", amount: 349.99, date: "2025-12-20" },
-      { id: "TX-1003", merchant: "PayPal", erp: "", status: "Merchant-only", amount: 79.0, date: "2025-12-21" },
-      { id: "TX-1004", merchant: "", erp: "QuickBooks", status: "ERP-only", amount: 615.5, date: "2025-12-21" },
+      { key: "dashboard" as const, label: "Dashboard" },
+      { key: "balanceSheet" as const, label: "Balance Sheet" },
+      { key: "merchantRecon" as const, label: "Merchant Reconciliation" },
+      { key: "help" as const, label: "Help" },
+      { key: "settings" as const, label: "Settings" },
     ],
     []
   );
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.id.toLowerCase().includes(q) ||
-        r.merchant.toLowerCase().includes(q) ||
-        r.erp.toLowerCase().includes(q) ||
-        r.status.toLowerCase().includes(q)
-    );
-  }, [query, rows]);
-
-  const counts = useMemo(() => {
-    const c = { Matched: 0, "Needs Review": 0, "Merchant-only": 0, "ERP-only": 0 } as Record<Row["status"], number>;
-    rows.forEach((r) => (c[r.status] += 1));
-    return c;
-  }, [rows]);
+  async function handleCheckUpdates() {
+    try {
+      if (window.electronAPI?.checkForUpdates) {
+        await window.electronAPI.checkForUpdates();
+        alert("Checking for updates…");
+      } else {
+        alert("Update checker not available (are you running the packaged app?)");
+      }
+    } catch (e: any) {
+      alert(`Update check failed: ${e?.message || e}`);
+    }
+  }
 
   return (
-    <div style={{ fontFamily: "system-ui, Segoe UI, Arial", background: "#f6f7fb", minHeight: "100vh" }}>
-      {/* Header */}
-      <div style={{ background: "white", borderBottom: "1px solid #e6e8ef" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "18px 18px", display: "flex", alignItems: "center", gap: 14 }}>
-          <img
-            src="/stalliant.png"
-            alt="Stalliant"
-            style={{ height: 34, width: "auto", display: "block" }}
-          />
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 0.2 }}>Stalliant Live</div>
-            <div style={{ fontSize: 12, color: "#667085" }}>
-              Desktop demo — reconciliation dashboard (sample data)
-            </div>
-          </div>
-          <div style={{ marginLeft: "auto" }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search (txn, merchant, ERP, status)…"
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #d7dbe7",
-                width: 320,
-                outline: "none",
-              }}
+    <div style={styles.app}>
+      {/* Top bar */}
+      <div style={styles.topbar}>
+        <div style={styles.brandLeft}>
+          <div style={styles.logoWrap}>
+            <img
+              src={stalliantLogo}
+              alt="Stalliant"
+              style={styles.logoImg}
             />
           </div>
+          <div>
+            <div style={styles.title}>Stalliant Live</div>
+            <div style={styles.subtitle}>Close + Reconciliation Toolkit</div>
+          </div>
+        </div>
+
+        <div style={styles.topbarRight}>
+          <button style={styles.ghostBtn} onClick={handleCheckUpdates}>
+            Check for Updates
+          </button>
         </div>
       </div>
 
-      {/* Body */}
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 18 }}>
-        {/* KPI cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          <Kpi title="Matched" value={counts["Matched"]} />
-          <Kpi title="Needs Review" value={counts["Needs Review"]} />
-          <Kpi title="Merchant-only" value={counts["Merchant-only"]} />
-          <Kpi title="ERP-only" value={counts["ERP-only"]} />
-        </div>
+      {/* Layout */}
+      <div style={styles.layout}>
+        {/* Sidebar */}
+        <div style={styles.sidebar}>
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              style={{
+                ...styles.navBtn,
+                ...(tab === t.key ? styles.navBtnActive : {}),
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
 
-        {/* Table */}
-        <div style={{ marginTop: 14, background: "white", border: "1px solid #e6e8ef", borderRadius: 14, overflow: "hidden" }}>
-          <div style={{ padding: "12px 14px", borderBottom: "1px solid #eef0f6", display: "flex", alignItems: "center" }}>
-            <div style={{ fontWeight: 700 }}>Exceptions & Matches</div>
-            <div style={{ marginLeft: "auto", color: "#667085", fontSize: 12 }}>
-              Showing {filtered.length} of {rows.length}
+          <div style={styles.sidebarCard}>
+            <div style={styles.cardTitle}>Entities</div>
+            <div style={styles.entityList}>
+              {ENTITIES.map((e) => (
+                <div key={e} style={styles.entityPill}>
+                  {e}
+                </div>
+              ))}
             </div>
           </div>
-
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", background: "#fbfcff" }}>
-                <Th>Txn</Th>
-                <Th>Date</Th>
-                <Th>Merchant</Th>
-                <Th>ERP</Th>
-                <Th>Status</Th>
-                <Th style={{ textAlign: "right" }}>Amount</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} style={{ borderTop: "1px solid #eef0f6" }}>
-                  <Td>{r.id}</Td>
-                  <Td>{r.date}</Td>
-                  <Td>{r.merchant || <span style={{ color: "#98a2b3" }}>—</span>}</Td>
-                  <Td>{r.erp || <span style={{ color: "#98a2b3" }}>—</span>}</Td>
-                  <Td>
-                    <Badge status={r.status} />
-                  </Td>
-                  <Td style={{ textAlign: "right" }}>${r.amount.toFixed(2)}</Td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <Td colSpan={6} style={{ padding: 18, color: "#667085" }}>
-                    No results.
-                  </Td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         </div>
 
-        <div style={{ marginTop: 10, color: "#667085", fontSize: 12 }}>
-          Tip: updates will be checked at launch (packaged builds) and delivered via GitHub Releases.
+        {/* Main content */}
+        <div style={styles.content}>
+          {tab === "dashboard" && (
+            <div style={styles.panel}>
+              <h2 style={styles.h2}>Dashboard</h2>
+              <div style={styles.grid2}>
+                <div style={styles.kpiCard}>
+                  <div style={styles.kpiLabel}>Merchant Recon Output Folder</div>
+                  <div style={styles.kpiValue}>{merchantOutPath}</div>
+                </div>
+                <div style={styles.kpiCard}>
+                  <div style={styles.kpiLabel}>Balance Sheet Output Folder</div>
+                  <div style={styles.kpiValue}>{balanceOutPath}</div>
+                </div>
+              </div>
+
+              <div style={{ ...styles.panel, marginTop: 16 }}>
+                <div style={styles.sectionTitle}>Quick Actions</div>
+                <div style={styles.row}>
+                  <button style={styles.primaryBtn}>Run Merchant Reconciliation</button>
+                  <button style={styles.primaryBtn}>Run Balance Sheet Reconciliation</button>
+                  <button style={styles.ghostBtn} onClick={() => setTab("settings")}>
+                    Settings
+                  </button>
+                </div>
+                <div style={styles.note}>
+                  Tip: outputs will be organized by date in the folders set in <b>Settings</b>.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === "balanceSheet" && (
+            <div style={styles.panel}>
+              <h2 style={styles.h2}>Balance Sheet</h2>
+              <div style={styles.note}>
+                This is the staging area for balance sheet reconciliation outputs by entity and date.
+              </div>
+
+              <div style={styles.sectionTitle}>Entities in Scope</div>
+              <ul style={styles.ul}>
+                {ENTITIES.map((e) => (
+                  <li key={e} style={styles.li}>{e}</li>
+                ))}
+              </ul>
+
+              <div style={styles.sectionTitle}>Output Location</div>
+              <div style={styles.pathBox}>{balanceOutPath}</div>
+            </div>
+          )}
+
+          {tab === "merchantRecon" && (
+            <div style={styles.panel}>
+              <h2 style={styles.h2}>Merchant Reconciliation</h2>
+              <div style={styles.note}>
+                This is the staging area for merchant reconciliation outputs by entity and date.
+              </div>
+
+              <div style={styles.sectionTitle}>Entities in Scope</div>
+              <ul style={styles.ul}>
+                {ENTITIES.map((e) => (
+                  <li key={e} style={styles.li}>{e}</li>
+                ))}
+              </ul>
+
+              <div style={styles.sectionTitle}>Output Location</div>
+              <div style={styles.pathBox}>{merchantOutPath}</div>
+            </div>
+          )}
+
+          {tab === "help" && (
+            <div style={styles.panel}>
+              <h2 style={styles.h2}>Help & FAQs</h2>
+
+              <div style={styles.faq}>
+                <div style={styles.q}>Where do completed reconciliations go?</div>
+                <div style={styles.a}>
+                  Outputs are saved into the folders configured in <b>Settings</b>, organized by date.
+                </div>
+              </div>
+
+              <div style={styles.faq}>
+                <div style={styles.q}>How do I manually check for updates?</div>
+                <div style={styles.a}>
+                  Use <b>Help → Check for Updates</b> from the top menu, or click the
+                  <b> “Check for Updates”</b> button in the top right of the app.
+                </div>
+              </div>
+
+              <div style={styles.faq}>
+                <div style={styles.q}>The app opens but looks blank / missing UI</div>
+                <div style={styles.a}>
+                  That usually means the packaged build couldn’t find its web assets.
+                  We fixed this by setting Vite <code>base: "./"</code> and loading the built
+                  <code> index.html</code> via Electron <code>loadFile()</code>.
+                </div>
+              </div>
+
+              <div style={styles.panelDivider} />
+
+              <div style={styles.sectionTitle}>Need help?</div>
+              <div style={styles.note}>
+                Email Brent:{" "}
+                <a style={styles.link} href="mailto:brent.wimmer@stalliant.com">
+                  brent.wimmer@stalliant.com
+                </a>
+              </div>
+            </div>
+          )}
+
+          {tab === "settings" && (
+            <div style={styles.panel}>
+              <h2 style={styles.h2}>Settings</h2>
+
+              <div style={styles.field}>
+                <div style={styles.label}>Merchant Reconciliation Output Folder</div>
+                <input
+                  style={styles.input}
+                  value={merchantOutPath}
+                  onChange={(e) => setMerchantOutPath(e.target.value)}
+                />
+              </div>
+
+              <div style={styles.field}>
+                <div style={styles.label}>Balance Sheet Reconciliation Output Folder</div>
+                <input
+                  style={styles.input}
+                  value={balanceOutPath}
+                  onChange={(e) => setBalanceOutPath(e.target.value)}
+                />
+              </div>
+
+              <div style={styles.note}>
+                Next polish step: store these settings in a config file or localStorage so they
+                persist per-user machine.
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function Kpi({ title, value }: { title: string; value: number }) {
-  return (
-    <div style={{ background: "white", border: "1px solid #e6e8ef", borderRadius: 14, padding: 14 }}>
-      <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 26, fontWeight: 800 }}>{value}</div>
-    </div>
-  );
-}
+const styles: Record<string, React.CSSProperties> = {
+  app: {
+    height: "100vh",
+    width: "100vw",
+    background: "linear-gradient(135deg, #0b1220, #0f1b33)",
+    color: "#e8eefc",
+    fontFamily: "Segoe UI, Inter, system-ui, -apple-system, Arial",
+  },
+  topbar: {
+    height: 76,
+    padding: "14px 18px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(10, 16, 30, 0.55)",
+    backdropFilter: "blur(10px)",
+  },
+  brandLeft: { display: "flex", alignItems: "center", gap: 14 },
+  logoWrap: {
+    width: 170,
+    height: 36,
+    display: "flex",
+    alignItems: "center",
+  },
+  logoImg: {
+    maxWidth: "100%",
+    maxHeight: "100%",
+    objectFit: "contain",
+    filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.35))",
+  },
+  title: { fontSize: 18, fontWeight: 700, letterSpacing: 0.2 },
+  subtitle: { fontSize: 12, opacity: 0.8, marginTop: 2 },
+  topbarRight: { display: "flex", alignItems: "center", gap: 10 },
 
-function Th({ children, style }: React.PropsWithChildren<{ style?: React.CSSProperties }>) {
-  return (
-    <th style={{ padding: "10px 12px", fontSize: 12, color: "#667085", fontWeight: 700, ...style }}>
-      {children}
-    </th>
-  );
-}
+  layout: { display: "flex", height: "calc(100vh - 76px)" },
+  sidebar: {
+    width: 260,
+    padding: 14,
+    borderRight: "1px solid rgba(255,255,255,0.10)",
+  },
+  navBtn: {
+    width: "100%",
+    textAlign: "left",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#e8eefc",
+    cursor: "pointer",
+    marginBottom: 10,
+  },
+  navBtnActive: {
+    background: "rgba(95, 155, 255, 0.18)",
+    border: "1px solid rgba(95, 155, 255, 0.45)",
+  },
+  sidebarCard: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+  },
+  cardTitle: { fontSize: 12, fontWeight: 700, opacity: 0.85, marginBottom: 10 },
+  entityList: { display: "flex", flexWrap: "wrap", gap: 8 },
+  entityPill: {
+    fontSize: 11,
+    padding: "6px 8px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(0,0,0,0.12)",
+  },
 
-function Td({ children, style, colSpan }: React.PropsWithChildren<{ style?: React.CSSProperties; colSpan?: number }>) {
-  return (
-    <td style={{ padding: "12px 12px", fontSize: 13, ...style }} colSpan={colSpan}>
-      {children}
-    </td>
-  );
-}
+  content: { flex: 1, padding: 18, overflow: "auto" },
+  panel: {
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    padding: 16,
+    boxShadow: "0 18px 50px rgba(0,0,0,0.25)",
+  },
+  h2: { margin: 0, fontSize: 20, letterSpacing: 0.2 },
+  sectionTitle: { marginTop: 14, fontSize: 13, fontWeight: 700, opacity: 0.9 },
+  note: { marginTop: 10, fontSize: 12, opacity: 0.85, lineHeight: 1.45 },
 
-function Badge({ status }: { status: Row["status"] }) {
-  const map: Record<Row["status"], { bg: string; fg: string; border: string }> = {
-    Matched: { bg: "#ecfdf3", fg: "#027a48", border: "#a6f4c5" },
-    "Needs Review": { bg: "#fffaeb", fg: "#b54708", border: "#fedf89" },
-    "Merchant-only": { bg: "#f0f9ff", fg: "#026aa2", border: "#b9e6fe" },
-    "ERP-only": { bg: "#fdf2fa", fg: "#c11574", border: "#fcceee" },
-  };
+  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 },
+  kpiCard: {
+    borderRadius: 16,
+    padding: 14,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(0,0,0,0.12)",
+  },
+  kpiLabel: { fontSize: 11, opacity: 0.8 },
+  kpiValue: { marginTop: 8, fontSize: 12, fontWeight: 600, wordBreak: "break-word" },
 
-  const s = map[status];
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "4px 10px",
-        borderRadius: 999,
-        background: s.bg,
-        color: s.fg,
-        border: `1px solid ${s.border}`,
-        fontSize: 12,
-        fontWeight: 700,
-      }}
-    >
-      {status}
-    </span>
-  );
-}
+  row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 },
+  primaryBtn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(95, 155, 255, 0.45)",
+    background: "rgba(95, 155, 255, 0.18)",
+    color: "#e8eefc",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  ghostBtn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
+    color: "#e8eefc",
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+
+  field: { marginTop: 14 },
+  label: { fontSize: 12, fontWeight: 700, opacity: 0.9, marginBottom: 6 },
+  input: {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.20)",
+    color: "#e8eefc",
+    outline: "none",
+  },
+  pathBox: {
+    marginTop: 10,
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(0,0,0,0.12)",
+    fontSize: 12,
+    fontWeight: 600,
+    wordBreak: "break-word",
+  },
+
+  ul: { marginTop: 10, paddingLeft: 18 },
+  li: { fontSize: 12, opacity: 0.9, marginBottom: 6 },
+
+  faq: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(0,0,0,0.12)",
+  },
+  q: { fontSize: 12, fontWeight: 800, marginBottom: 6 },
+  a: { fontSize: 12, opacity: 0.9, lineHeight: 1.45 },
+
+  panelDivider: {
+    height: 1,
+    background: "rgba(255,255,255,0.10)",
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  link: { color: "#9cc1ff" },
+};
+

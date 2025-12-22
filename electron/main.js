@@ -1,8 +1,57 @@
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
+const path = require("path");
+const { spawn } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
-  process.env.NODE_ENV === "development";
+let mainWindow = null;
+let pyProc = null;
+
+function isDev() {
+  return !app.isPackaged;
+}
+
+function log(...args) {
+  console.log("[main]", ...args);
+}
+
+function startPythonApi() {
+  try {
+    const apiDir = path.join(__dirname, "..", "api");
+
+    // NOTE: This assumes Python is installed on the machine and `python` is in PATH.
+    // If coworkers don't have Python, you’ll need to bundle Python later.
+    pyProc = spawn("python", ["-m", "uvicorn", "app:app", "--port", "8000"], {
+      cwd: apiDir,
+      stdio: "inherit",
+      windowsHide: true,
+    });
+
+    pyProc.on("error", (err) => {
+      log("Python spawn error:", err);
+    });
+
+    pyProc.on("exit", (code) => {
+      log("Python exited with code:", code);
+      pyProc = null;
+    });
+
+    log("Python API started");
+  } catch (e) {
+    log("Failed to start Python API:", e);
+  }
+}
+
+function stopPythonApi() {
+  if (pyProc) {
+    try {
+      pyProc.kill();
+    } catch (_) {}
+    pyProc = null;
+  }
+}
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     title: "Stalliant Live",
@@ -13,73 +62,117 @@ function createWindow() {
     },
   });
 
-  if (isDev) {
-    // Dev: Vite dev server
-    win.loadURL("http://localhost:5173");
-    win.webContents.openDevTools({ mode: "detach" });
+  if (isDev()) {
+    mainWindow.loadURL("http://localhost:5173");
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    // Prod: load the packaged Vite build output
-    // Your electron-builder "files" includes web/dist/**/*, so this will exist in app.asar resources.
-    const indexHtml = path.join(__dirname, "..", "web", "dist", "index.html");
-    win.loadFile(indexHtml);
+    // Load the built Vite app
+    const indexPath = path.join(__dirname, "..", "web", "dist", "index.html");
+    mainWindow.loadFile(indexPath);
   }
 
-  return win;
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
-function startPythonApi() {
-  try {
-    const apiDir = path.join(__dirname, "..", "api");
-    pyProc = spawn("python", ["-m", "uvicorn", "app:app", "--port", "8000"], {
-      cwd: apiDir,
-      stdio: "inherit",
-      windowsHide: true,
-    });
+function buildMenu() {
+  const template = [
+    {
+      label: "File",
+      submenu: [
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forcereload" },
+        { role: "toggledevtools" },
+        { type: "separator" },
+        { role: "resetzoom" },
+        { role: "zoomin" },
+        { role: "zoomout" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates",
+          click: async () => {
+            try {
+              autoUpdater.checkForUpdatesAndNotify();
+              dialog.showMessageBox({
+                type: "info",
+                message: "Checking for updates…",
+              });
+            } catch (e) {
+              dialog.showMessageBox({
+                type: "error",
+                message: `Update check failed: ${e?.message || e}`,
+              });
+            }
+          },
+        },
+      ],
+    },
+  ];
 
-    pyProc.on("error", (err) => {
-      console.error("[python] failed to start:", err);
-    });
-  } catch (err) {
-    console.error("[python] exception:", err);
-  }
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
 
 function wireAutoUpdates() {
-  // Only run updater in packaged builds
-  if (isDev) return;
+  // Optional: reduce noise
+  autoUpdater.autoDownload = true;
 
-  autoUpdater.logger = console;
-  autoUpdater.on("checking-for-update", () => console.log("[updater] checking..."));
-  autoUpdater.on("update-available", () => console.log("[updater] update available"));
-  autoUpdater.on("update-not-available", () => console.log("[updater] no update"));
-  autoUpdater.on("error", (err) => console.error("[updater] error", err));
-  autoUpdater.on("download-progress", (p) =>
-    console.log(`[updater] ${Math.round(p.percent)}%`)
-  );
+  autoUpdater.on("checking-for-update", () => log("checking-for-update"));
+  autoUpdater.on("update-available", () => log("update-available"));
+  autoUpdater.on("update-not-available", () => log("update-not-available"));
+  autoUpdater.on("error", (err) => log("autoUpdater error:", err));
+  autoUpdater.on("download-progress", (p) => log("download-progress", p.percent));
   autoUpdater.on("update-downloaded", () => {
-    console.log("[updater] update downloaded; will install on quit");
-    // common behavior: install when the user closes the app
-    // autoUpdater.quitAndInstall(); // (optional if you want immediate install)
+    log("update-downloaded");
+    // You can choose to auto-install or prompt. For now we'll prompt from the renderer.
+    if (mainWindow) {
+      mainWindow.webContents.send("update-downloaded");
+    }
   });
 
-  autoUpdater.checkForUpdatesAndNotify();
+  // Allow renderer button to trigger a manual check
+  ipcMain.handle("updates:check", async () => {
+    autoUpdater.checkForUpdatesAndNotify();
+    return true;
+  });
+
+  // Allow renderer button to install update
+  ipcMain.handle("updates:install", async () => {
+    autoUpdater.quitAndInstall();
+    return true;
+  });
+
+  // Kick an automatic check on launch (packaged only)
+  if (!isDev()) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
 }
 
 app.whenReady().then(() => {
+  buildMenu();
   wireAutoUpdates();
   startPythonApi();
   createWindow();
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 });
 
 app.on("window-all-closed", () => {
-  if (pyProc) {
-    try {
-      pyProc.kill();
-    } catch (_) {}
-  }
+  stopPythonApi();
   if (process.platform !== "darwin") app.quit();
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
