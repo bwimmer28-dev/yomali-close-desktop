@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "concurrently \"cd api && uvicorn app:app --reload --port 8000\" \"cd web && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "build:web": "cd web && npm install && npm run build",
-    "dist": "npm run build:web && electron-builder"
+    "dist": "npm run build:web && electron-builder",
+    "publish": "npm run build:web && electron-builder --publish always"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
     "wait-on": "^8.0.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   },
   "build": {
     "appId": "com.stalliant.yomali.close",
@@ -24,16 +28,13 @@
     ],
     "win": {
       "target": "nsis"
-    }, 
-   "publish": [
-  {
-    "provider": "github",
-    "owner": "bwimmer28-dev",
-    "repo": "yomali-close-desktop"
-  }
-]
-  },
-  "dependencies": {
-    "electron-updater": "^6.6.2"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "bwimmer28-dev",
+        "repo": "yomali-close-desktop"
+      }
+    ]
   }
 }
