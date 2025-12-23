@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import "./App.css";
 
 type Tab = "merchant" | "balancesheet" | "dev" | "help" | "settings";
 
