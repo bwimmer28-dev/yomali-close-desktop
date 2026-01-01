@@ -1,0 +1,349 @@
+/* web/src/index.css */
+:root {
+  --bg: #0b1220;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel2: rgba(255, 255, 255, 0.09);
+  --stroke: rgba(255, 255, 255, 0.12);
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.65);
+  --muted2: rgba(255, 255, 255, 0.45);
+  --shadow: 0 16px 60px rgba(0,0,0,.35);
+  --radius: 14px;
+  --radius2: 18px;
+
+  --accent: #7dd3fc;   /* light blue */
+  --accent2: #a78bfa;  /* violet */
+  --good: #34d399;
+  --warn: #fbbf24;
+  --bad:  #fb7185;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--text);
+  background:
+    radial-gradient(1200px 700px at 15% 15%, rgba(125, 211, 252, 0.18), transparent 55%),
+    radial-gradient(900px 600px at 80% 20%, rgba(167, 139, 250, 0.16), transparent 50%),
+    radial-gradient(900px 700px at 60% 85%, rgba(52, 211, 153, 0.10), transparent 55%),
+    var(--bg);
+}
+
+a { color: inherit; }
+
+.appShell {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  padding: 18px;
+  border-right: 1px solid var(--stroke);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius2);
+  background: rgba(0,0,0,0.18);
+  box-shadow: var(--shadow);
+}
+.brandTitle {
+  font-weight: 700;
+  letter-spacing: .2px;
+  font-size: 18px;
+}
+.brandSub {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.nav {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.navLabel {
+  margin: 14px 8px 6px;
+  color: var(--muted2);
+  font-size: 12px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.navBtn {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.navBtn:hover {
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,255,255,.06);
+}
+.navBtnActive {
+  background: rgba(125,211,252,.10);
+  border-color: rgba(125,211,252,.22);
+}
+.navHint {
+  color: var(--muted2);
+  font-size: 12px;
+}
+
+.entityPanel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius2);
+  background: rgba(0,0,0,0.18);
+}
+
+.entityHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.entityHeader h4 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+.searchInput {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  outline: none;
+}
+.searchInput::placeholder { color: rgba(255,255,255,.38); }
+.searchInput:focus {
+  border-color: rgba(125,211,252,.35);
+  box-shadow: 0 0 0 4px rgba(125,211,252,.10);
+}
+
+.entityChips {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 200px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.chip {
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  padding: 7px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.chip:hover { border-color: rgba(255,255,255,.20); }
+.chipActive {
+  border-color: rgba(125,211,252,.35);
+  background: rgba(125,211,252,.10);
+}
+.pill {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  color: var(--muted);
+}
+.pillGood { border-color: rgba(52,211,153,.35); color: rgba(52,211,153,.95); background: rgba(52,211,153,.10); }
+.pillWarn { border-color: rgba(251,191,36,.35); color: rgba(251,191,36,.95); background: rgba(251,191,36,.10); }
+
+.main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.topbar {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--stroke);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+}
+
+.breadcrumb {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.breadcrumbTitle { font-weight: 650; font-size: 15px; }
+.breadcrumbMeta { color: var(--muted); font-size: 12.5px; }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  cursor: pointer;
+}
+.btn:hover { border-color: rgba(255,255,255,.22); }
+.btnPrimary {
+  border-color: rgba(125,211,252,.30);
+  background: rgba(125,211,252,.12);
+}
+.btnDanger {
+  border-color: rgba(251,113,133,.35);
+  background: rgba(251,113,133,.10);
+}
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.content {
+  padding: 18px;
+  overflow: auto;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 14px;
+}
+@media (max-width: 1100px) {
+  .appShell { grid-template-columns: 260px 1fr; }
+  .grid2 { grid-template-columns: 1fr; }
+}
+
+.card {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius2);
+  background: rgba(0,0,0,0.18);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.cardHeader {
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cardTitle {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: .02em;
+}
+.cardSub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.cardBody { padding: 14px; }
+
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.kpi {
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255,255,255,.04);
+}
+.kpiLabel { color: var(--muted2); font-size: 12px; text-transform: uppercase; letter-spacing: .14em; }
+.kpiValue { margin-top: 6px; font-size: 22px; font-weight: 700; }
+.kpiNote { margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+}
+.table th, .table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  color: var(--muted2);
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,.04);
+}
+.table tr:last-child td { border-bottom: none; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.badgeGood { border-color: rgba(52,211,153,.35); color: rgba(52,211,153,.95); background: rgba(52,211,153,.10); }
+.badgeWarn { border-color: rgba(251,191,36,.35); color: rgba(251,191,36,.95); background: rgba(251,191,36,.10); }
+.badgeBad  { border-color: rgba(251,113,133,.35); color: rgba(251,113,133,.95); background: rgba(251,113,133,.10); }
+
+.formRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.field {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  outline: none;
+}
+.field::placeholder { color: rgba(255,255,255,.38); }
+
+.smallNote { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+.hr { height: 1px; background: rgba(255,255,255,.10); margin: 12px 0; }

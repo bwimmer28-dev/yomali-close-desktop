@@ -1,0 +1,19 @@
+from recon_backend.engine import run_reconciliation
+from recon_backend.outputs import write_outputs, write_json
+
+summary_df, exceptions_df, matches = run_reconciliation(
+    bank_path="Bank Statement.xlsx",
+    erp_path="Nav Ledger.xlsx",
+    processor_paths=[
+        ("stripe_itemized_payouts.csv", "stripe_itemized"),
+        ("braintree_transactions.csv", "braintree"),
+        ("nmi_transactions.csv", "nmi"),
+    ],
+    entity="HGS Affiliates",
+)
+
+# Excel output
+write_outputs("out/recon_output.xlsx", summary_df, exceptions_df, matches=matches)
+
+# Dashboard-friendly JSON
+write_json("out/summary.json", "out/exceptions.json", summary_df, exceptions_df)
