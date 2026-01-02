@@ -103,8 +103,8 @@ export default function MerchantReconciliation() {
           <p className="cardSub">Auto-run (ET) + manual runs. Processor totals vs CRM (HG NAV).</p>
         </div>
         <div className="smallNote">
-          Auto: <b>{status?.settings.auto_enabled ? "On" : "Off"}</b> • Time (ET):{" "}
-          <b>{status?.settings.auto_time_et || "—"}</b> • Lookback: <b>{status?.settings.lookback_business_days ?? "—"}</b>
+          Auto: <b>{status?.settings?.auto_enabled ? "On" : "Off"}</b> • Time (ET):{" "}
+          <b>{status?.settings?.auto_time_et || "—"}</b> • Lookback: <b>{status?.settings?.lookback_business_days ?? "—"}</b>
         </div>
       </div>
 
@@ -121,7 +121,7 @@ export default function MerchantReconciliation() {
               <div className="formRow">
                 <label className="smallNote" style={{ minWidth: 120 }}>Entity</label>
                 <select className="field" value={entityId} onChange={(e) => setEntityId(e.target.value)}>
-                  {Object.keys(status?.entities || { helpgrid: { entity: "Helpgrid" } }).map((k) => (
+                  {Object.keys(status?.entities || { helpgrid: 1 }).map((k) => (
                     <option key={k} value={k}>
                       {status?.entities?.[k]?.entity || k}
                     </option>
@@ -134,12 +134,12 @@ export default function MerchantReconciliation() {
               <div className="kpiRow">
                 <div className="kpi">
                   <div className="kpiLabel">Last daily</div>
-                  <div className="kpiValue">{fmtDate(ent?.last_daily)}</div>
+                  <div className="kpiValue">{fmtDate(ent?.lastDailyAt)}</div>
                   <div className="kpiNote">Latest completed</div>
                 </div>
                 <div className="kpi">
                   <div className="kpiLabel">Last super</div>
-                  <div className="kpiValue">{fmtDate(ent?.last_super)}</div>
+                  <div className="kpiValue">{fmtDate(ent?.lastSuperAt)}</div>
                   <div className="kpiNote">Month-end run</div>
                 </div>
               </div>
