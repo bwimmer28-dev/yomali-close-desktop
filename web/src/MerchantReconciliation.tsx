@@ -121,7 +121,7 @@ export default function MerchantReconciliation() {
               <div className="formRow">
                 <label className="smallNote" style={{ minWidth: 120 }}>Entity</label>
                 <select className="field" value={entityId} onChange={(e) => setEntityId(e.target.value)}>
-                  {Object.keys(status?.entities || { helpgrid: 1 }).map((k) => (
+                  {Object.keys(status?.entities || { helpgrid: { entity: "Helpgrid" } }).map((k) => (
                     <option key={k} value={k}>
                       {status?.entities?.[k]?.entity || k}
                     </option>
