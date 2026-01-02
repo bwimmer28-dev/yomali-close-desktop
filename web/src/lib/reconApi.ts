@@ -1,70 +1,139 @@
 // web/src/lib/reconApi.ts
-export type ReconCounts = {
-  summary_rows: number;
-  exceptions_rows: number;
+
+export type RunMode = "daily" | "super";
+
+export type EntityRunStatus = {
+  entity: string;
+
+  // daily
+  lastDailyAt?: string | null;
+  lastDailyOutputPath?: string | null;
+  lastDailyOk?: boolean | null;
+
+  // super (wiring next pass, but we show it in status now)
+  lastSuperAt?: string | null;
+  lastSuperOutputPath?: string | null;
+  lastSuperOk?: boolean | null;
+
+  // optional helpful fields
+  message?: string | null;
 };
 
-export type ReconResponse = {
-  download_token: string;
-  summary: Record<string, any>[];
-  exceptions: Record<string, any>[];
-  counts: ReconCounts;
+export type StatusResponse = {
+  ok: boolean;
+  serverTime?: string;
+  entities?: EntityRunStatus[];
 };
 
-// Some UI components use this name
-export type ReconRow = Record<string, any>;
+function baseUrl() {
+  // Prefer Vite env var if you set it; otherwise localhost.
+  // Example: VITE_RECON_API_URL=http://127.0.0.1:8000
+  const v = (import.meta as any).env?.VITE_RECON_API_URL;
+  return (v && String(v).trim()) || "http://127.0.0.1:8000";
+}
 
-const PROD_BASE = "http://127.0.0.1:8000";
-const DEV_BASE = "/api";
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
 
 /**
- * In dev we prefer the Vite proxy at /api -> 127.0.0.1:8000 (see vite.config.ts).
- * In prod (Electron file://) we call the local backend directly.
+ * Health is just a quick connectivity check.
+ * (Not exported by default — your UI imports apiStatus, not health.)
  */
-export function apiBase(): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isDev = (import.meta as any).env?.DEV;
-  return isDev ? DEV_BASE : PROD_BASE;
+async function health(): Promise<{ ok: boolean }> {
+  return jsonFetch<{ ok: boolean }>(`${baseUrl()}/health`);
 }
 
-export type ReconcileArgs = {
-  entity?: string;
-  bankFile: File;
-  erpFile: File;
-  processorFiles: { type: string; file: File }[];
-  amountTolerance?: number;
-  dateWindowDays?: number;
-  allowAmountOnly?: boolean;
-};
-
-export async function reconcileFiles(args: ReconcileArgs): Promise<ReconResponse> {
-  const form = new FormData();
-  form.append("bank", args.bankFile);
-  form.append("erp", args.erpFile);
-
-  for (const p of args.processorFiles) {
-    form.append("processors", p.file);
-    form.append("processor_types", p.type);
-  }
-
-  if (args.entity) form.append("entity", args.entity);
-  if (args.amountTolerance != null) form.append("amount_tolerance", String(args.amountTolerance));
-  if (args.dateWindowDays != null) form.append("date_window_days", String(args.dateWindowDays));
-  if (args.allowAmountOnly != null) form.append("allow_amount_only", String(args.allowAmountOnly));
-
-  const r = await fetch(`${apiBase()}/reconcile`, { method: "POST", body: form });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`Reconcile failed: ${r.status} ${txt}`);
-  }
-  return r.json();
+/**
+ * Main status call the UI expects.
+ * Backend should return something like:
+ * { ok: true, entities: [ { entity: "Helpgrid", lastDailyAt: "...", lastSuperAt: "..." } ] }
+ */
+export async function apiStatus(): Promise<StatusResponse> {
+  // If your backend uses /status, keep as-is.
+  // If yours is /api/status, change to `${baseUrl()}/api/status`.
+  return jsonFetch<StatusResponse>(`${baseUrl()}/status`).catch(async () => {
+    // fallback: some builds only have /health; treat as "ok but no entities"
+    const h = await health();
+    return { ok: !!h.ok, entities: [] };
+  });
 }
 
-// Backwards-compatible name used by App.tsx
-export const reconcile = reconcileFiles;
+/**
+ * Kick off a DAILY run for an entity.
+ * The backend should be responsible for:
+ *  - skipping rerun if output already exists for entity/day
+ *  - returning a message that indicates "skipped" vs "ran"
+ */
+export async function runDaily(entity: string) {
+  const payload = { entity };
+  // If your backend route differs, change it here.
+  // Common patterns: /run/daily or /runDaily
+  return jsonFetch<{ ok: boolean; skipped?: boolean; message?: string }>(
+    `${baseUrl()}/run/daily`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
 
-export async function downloadXlsx(token: string): Promise<Blob> {
-  const r = await fetch(`${apiBase()}/download/${encodeURIComponent(token)}`);
-  if (!r.ok) throw new Error(`Download failed: ${r.status}`);
-  return r.blob();
+/**
+ * Manual "RUN NOW" button (ad-hoc run).
+ * You can treat it as a "super" later if you want;
+ * right now it’s just a manual trigger.
+ */
+export async function runNow(entity: string) {
+  const payload = { entity };
+  // If your backend route differs, change it here.
+  return jsonFetch<{ ok: boolean; skipped?: boolean; message?: string }>(
+    `${baseUrl()}/run/now`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+/**
+ * Download the output XLSX from the backend.
+ * Backend route can be either:
+ *  - GET /download?entity=...&mode=daily
+ *  - or something similar.
+ */
+export async function downloadXlsx(entity: string, mode: RunMode = "daily") {
+  const url = `${baseUrl()}/download?entity=${encodeURIComponent(
+    entity
+  )}&mode=${encodeURIComponent(mode)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Download failed: HTTP ${res.status}: ${text}`);
+  }
+
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+
+  // Try to use filename from header if present
+  const cd = res.headers.get("content-disposition") || "";
+  const match = /filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i.exec(cd);
+  const filename =
+    (match?.[1] ? decodeURIComponent(match[1]) : match?.[2]) ||
+    `${entity}_${mode}_recon.xlsx`;
+
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(objectUrl);
 }

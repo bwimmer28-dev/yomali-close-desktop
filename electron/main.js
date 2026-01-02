@@ -1,114 +1,234 @@
+/* electron/main.js (CommonJS)
+   - Starts FastAPI/Uvicorn backend automatically
+   - Restarts backend if it crashes/exits
+   - Waits for /health before loading the UI (optional but recommended)
+*/
+
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
-const fs = require("fs");
-const Store = require("electron-store");
-const ExcelJS = require("exceljs");
+const { spawn } = require("child_process");
 
-const isDev = !app.isPackaged;
+let mainWindow = null;
+let pyProc = null;
+let isQuitting = false;
 
-const store = new Store({
-  name: "stalliant-live-settings",
-  defaults: {
-    brandTitle: "Stalliant Live",
-    merchantOutputRoot: path.join(app.getPath("Documents"), "StalliantLive", "Outputs", "Merchant"),
-    balanceSheetOutputRoot: path.join(app.getPath("Documents"), "StalliantLive", "Outputs", "BalanceSheet"),
-    cadence: { enabled: false, frequency: "daily", timeET: "23:00" }, // future auto-run
-    lastPeriod: currentPeriod(),
-  },
-});
+const isDev =
+  !app.isPackaged ||
+  process.env.NODE_ENV === "development" ||
+  process.env.ELECTRON_START_URL?.includes("localhost");
 
-let mainWindow;
-
-function currentPeriod() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${yyyy}-${mm}`; // YYYY-MM
+function log(...args) {
+  console.log("[main]", ...args);
+}
+function warn(...args) {
+  console.warn("[main]", ...args);
+}
+function err(...args) {
+  console.error("[main]", ...args);
 }
 
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-  return p;
-}
+/** -------- Backend config -------- */
+const API_HOST = process.env.RECON_HOST || "127.0.0.1";
+const API_PORT = process.env.RECON_PORT || "8000";
+const HEALTH_URL = `http://${API_HOST}:${API_PORT}/health`;
 
-function parseTimeET(timeET) {
-  // expects "HH:MM"
-  const m = /^(\d{1,2}):(\d{2})$/.exec(timeET || "");
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-  return { hh, mm };
-}
+const BACKEND_IMPORT = process.env.RECON_BACKEND_IMPORT || "recon_backend.api_app:app";
+const BACKEND_HOST = process.env.RECON_BACKEND_HOST || API_HOST;
+const BACKEND_PORT = process.env.RECON_BACKEND_PORT || API_PORT;
 
-async function createWorkbookForMerchantReport({ entity, period, processor, summary, exceptions }) {
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "Stalliant Live";
-  wb.created = new Date();
+// How often we ping /health once running
+const HEALTH_PING_MS = Number(process.env.RECON_HEALTH_PING_MS || 15000);
 
-  const ws1 = wb.addWorksheet("Summary");
-  ws1.addRow(["Entity", entity]);
-  ws1.addRow(["Period", period]);
-  ws1.addRow(["Processor", processor]);
-  ws1.addRow(["Generated At", new Date().toLocaleString()]);
-  ws1.addRow([]);
-  ws1.addRow(["Metric", "Value"]);
-  for (const [k, v] of Object.entries(summary || {})) {
-    ws1.addRow([k, v]);
+// Restart backoff (ms)
+const RESTART_BASE_DELAY_MS = Number(process.env.RECON_RESTART_BASE_MS || 2000);
+const RESTART_MAX_DELAY_MS = Number(process.env.RECON_RESTART_MAX_MS || 60000);
+
+/**
+ * Where to run the backend from.
+ * - In dev, assume repo root is one level up from /electron
+ * - In prod, you may need to ship the backend inside resources and point this there.
+ */
+function getBackendCwd() {
+  if (!app.isPackaged) {
+    // electron/.. (repo root)
+    return path.join(__dirname, "..");
   }
+  // When packaged: <app>/resources/app.asar (or unpacked)
+  // If you ship backend alongside, adjust this path.
+  // Default: run from resourcesPath (unpacked) or from app.getAppPath().
+  return process.env.RECON_BACKEND_CWD || app.getAppPath();
+}
 
-  const ws2 = wb.addWorksheet("Exceptions");
-  ws2.addRow(["ticket_id", "severity", "issue_code", "message", "amount", "reference"]);
-  (exceptions || []).forEach((x) => {
-    ws2.addRow([
-      x.ticket_id || "",
-      x.severity || "Medium",
-      x.issue_code || "",
-      x.message || "",
-      typeof x.amount === "number" ? x.amount : "",
-      x.reference || "",
-    ]);
+/**
+ * Choose python executable.
+ * - Prefer explicit env var if set (useful if you bundle python later)
+ * - Else try "python" and fallback to "py" on Windows
+ */
+function getPythonCommand() {
+  if (process.env.RECON_PYTHON) return process.env.RECON_PYTHON;
+  if (process.platform === "win32") return "python"; // "py" fallback handled at spawn error
+  return "python3";
+}
+
+function spawnBackend(pythonCmd) {
+  const cwd = getBackendCwd();
+
+  const args = [
+    "-m",
+    "uvicorn",
+    BACKEND_IMPORT,
+    "--host",
+    String(BACKEND_HOST),
+    "--port",
+    String(BACKEND_PORT),
+  ];
+
+  // If you want live reload in dev, uncomment:
+  // if (!app.isPackaged) args.push("--reload");
+
+  log("Starting backend:", pythonCmd, args.join(" "), "cwd=", cwd);
+
+  const child = spawn(pythonCmd, args, {
+    cwd,
+    env: {
+      ...process.env,
+      // Ensure unbuffered logs so we can see output in real time
+      PYTHONUNBUFFERED: "1",
+    },
+    windowsHide: true,
   });
 
-  ws2.columns.forEach((c) => (c.width = 28));
-  return wb;
+  child.stdout.on("data", (d) => log(String(d).trimEnd()));
+  child.stderr.on("data", (d) => warn(String(d).trimEnd()));
+
+  child.on("error", (e) => {
+    err("Backend spawn error:", e?.message || e);
+  });
+
+  return child;
 }
 
-async function createWorkbookForBalanceSheetReport({ entity, period, reconName, notes }) {
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "Stalliant Live";
-  wb.created = new Date();
-
-  const ws = wb.addWorksheet("Balance Sheet Rec");
-  ws.addRow(["Entity", entity]);
-  ws.addRow(["Period", period]);
-  ws.addRow(["Reconciliation", reconName]);
-  ws.addRow(["Generated At", new Date().toLocaleString()]);
-  ws.addRow([]);
-  ws.addRow(["Notes"]);
-  ws.addRow([notes || "Placeholder / to be populated by reconciliation template."]);
-
-  ws.columns.forEach((c) => (c.width = 36));
-  return wb;
+/** -------- Health check helpers -------- */
+async function fetchHealth() {
+  // Use global fetch (Node 18+). Electron recent versions include it.
+  const res = await fetch(HEALTH_URL, { method: "GET" });
+  if (!res.ok) throw new Error(`Health not OK: ${res.status}`);
+  const body = await res.json().catch(() => ({}));
+  return body;
 }
 
-function resolveMerchantOutputPath({ merchantOutputRoot, processor, period }) {
-  // Merchant > Paypal > 2025-10
-  const p = ensureDir(path.join(merchantOutputRoot, processor, period));
-  return p;
+async function waitForHealth({ timeoutMs = 30000, intervalMs = 500 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await fetchHealth();
+      return true;
+    } catch (_) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+  return false;
 }
 
-function resolveBSOutputPath({ balanceSheetOutputRoot, entity, period }) {
-  // BalanceSheet > ClickCRM > 2025-10
-  const p = ensureDir(path.join(balanceSheetOutputRoot, entity, period));
-  return p;
+/** -------- Restart loop -------- */
+let restartDelay = RESTART_BASE_DELAY_MS;
+let healthPingTimer = null;
+
+function clearHealthPing() {
+  if (healthPingTimer) {
+    clearInterval(healthPingTimer);
+    healthPingTimer = null;
+  }
 }
 
-function createWindow() {
+function startHealthPing() {
+  clearHealthPing();
+  healthPingTimer = setInterval(async () => {
+    try {
+      await fetchHealth();
+    } catch (e) {
+      warn("Health ping failed; backend may be down. Scheduling restart.", e?.message || e);
+      scheduleBackendRestart("health_ping_failed");
+    }
+  }, HEALTH_PING_MS);
+}
+
+function scheduleBackendRestart(reason) {
+  if (isQuitting) return;
+
+  // Avoid piling up restarts if we already have a running process
+  if (pyProc && !pyProc.killed) {
+    try {
+      pyProc.kill();
+    } catch (_) {}
+  }
+
+  const delay = Math.min(restartDelay, RESTART_MAX_DELAY_MS);
+  warn(`Restarting backend in ${Math.round(delay / 1000)}s (reason=${reason})`);
+  setTimeout(() => startPythonBackend({ resetBackoff: false }), delay);
+  restartDelay = Math.min(restartDelay * 1.5, RESTART_MAX_DELAY_MS);
+}
+
+async function startPythonBackend({ resetBackoff = true } = {}) {
+  if (isQuitting) return;
+
+  // If already running, don't start again
+  if (pyProc && !pyProc.killed) {
+    return;
+  }
+
+  if (resetBackoff) restartDelay = RESTART_BASE_DELAY_MS;
+
+  clearHealthPing();
+
+  // Try python then fallback to py on Windows if spawn fails quickly
+  const tryCmds = [];
+  const primary = getPythonCommand();
+  tryCmds.push(primary);
+  if (process.platform === "win32" && primary !== "py") tryCmds.push("py");
+
+  let started = false;
+  for (const cmd of tryCmds) {
+    try {
+      pyProc = spawnBackend(cmd);
+      started = true;
+      break;
+    } catch (e) {
+      err("Failed to spawn backend with", cmd, e?.message || e);
+      pyProc = null;
+    }
+  }
+  if (!started || !pyProc) {
+    scheduleBackendRestart("spawn_failed");
+    return;
+  }
+
+  pyProc.on("exit", (code, signal) => {
+    clearHealthPing();
+    pyProc = null;
+    if (isQuitting) return;
+    warn("Backend exited:", { code, signal });
+    scheduleBackendRestart("process_exit");
+  });
+
+  // Optional: wait for health before proceeding
+  const ok = await waitForHealth({ timeoutMs: 45000, intervalMs: 750 });
+  if (!ok) {
+    warn("Backend did not become healthy in time; restarting.");
+    scheduleBackendRestart("health_timeout");
+    return;
+  }
+
+  log("Backend healthy:", HEALTH_URL);
+  startHealthPing();
+}
+
+/** -------- Window creation -------- */
+async function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1250,
+    width: 1280,
     height: 820,
-    backgroundColor: "#0B1020",
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -116,153 +236,53 @@ function createWindow() {
     },
   });
 
-  if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+  mainWindow.once("ready-to-show", () => mainWindow.show());
+
+  if (isDev && process.env.ELECTRON_START_URL) {
+    await mainWindow.loadURL(process.env.ELECTRON_START_URL);
   } else {
-    const indexPath = path.join(__dirname, "..", "web", "dist", "index.html");
-    mainWindow.loadFile(indexPath);
+    // Adjust if your build output differs
+    await mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(() => {
-  createWindow();
+/** -------- App lifecycle -------- */
+app.on("before-quit", () => {
+  isQuitting = true;
+  clearHealthPing();
+  if (pyProc && !pyProc.killed) {
+    try {
+      pyProc.kill();
+    } catch (_) {}
+  }
+});
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+app.whenReady().then(async () => {
+  // 1) Ensure backend is running (and will auto-restart)
+  await startPythonBackend({ resetBackoff: true });
+
+  // 2) Create window
+  await createMainWindow();
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
-
-// -----------------------------
-// IPC: Settings
-// -----------------------------
-ipcMain.handle("settings:get", async () => {
-  return store.store;
-});
-
-ipcMain.handle("settings:set", async (_evt, patch) => {
-  const next = { ...store.store, ...(patch || {}) };
-  store.store = next;
-  return store.store;
-});
-
-ipcMain.handle("dialog:pickFolder", async () => {
-  const r = await dialog.showOpenDialog({
-    properties: ["openDirectory", "createDirectory"],
-  });
-  if (r.canceled || !r.filePaths?.[0]) return null;
-  return r.filePaths[0];
-});
-
-ipcMain.handle("dialog:pickFiles", async (_evt, { title, filters, multi } = {}) => {
-  const r = await dialog.showOpenDialog({
-    title: title || "Select file(s)",
-    properties: multi ? ["openFile", "multiSelections"] : ["openFile"],
-    filters: filters || [{ name: "Excel/CSV", extensions: ["xlsx", "xls", "csv"] }],
-  });
-  if (r.canceled) return [];
-  return r.filePaths || [];
-});
-
-ipcMain.handle("file:openPath", async (_evt, filePath) => {
-  if (!filePath) return { ok: false, error: "Missing path" };
-  const result = await shell.openPath(filePath);
-  if (result) return { ok: false, error: result };
-  return { ok: true };
-});
-
-// -----------------------------
-// Merchant: Reconcile Now (Phase 1)
-// -----------------------------
-ipcMain.handle("merchant:reconcileNow", async (_evt, payload) => {
-  const {
-    entity,
-    period,
-    processor, // "PayPal" | "Braintree" | "Stripe" etc
-    crmFiles = [],
-    bankFiles = [],
-    merchantFiles = [],
-  } = payload || {};
-
-  const settings = store.store;
-  const merchantOutputRoot = settings.merchantOutputRoot;
-
-  // TODO: Replace this stub with your real engine. For now we simulate:
-  const exceptions = [];
-  if ((crmFiles.length + bankFiles.length + merchantFiles.length) === 0) {
-    exceptions.push({
-      ticket_id: `TKT-${Date.now()}`,
-      severity: "High",
-      issue_code: "MISSING_INPUTS",
-      message: "No input files selected.",
-      amount: null,
-      reference: null,
-    });
-  } else {
-    // Simulate occasional “can’t reconcile”
-    exceptions.push({
-      ticket_id: `TKT-${Date.now()}`,
-      severity: "Medium",
-      issue_code: "AMOUNT_MISMATCH",
-      message: "Example discrepancy: net settlement differs from ERP clearing.",
-      amount: 125.43,
-      reference: processor || "Merchant",
-    });
+  // On macOS, apps typically stay open until Cmd+Q.
+  if (process.platform !== "darwin") {
+    app.quit();
   }
-
-  const summary = {
-    "CRM Files": crmFiles.length,
-    "Bank Files": bankFiles.length,
-    "Merchant Files": merchantFiles.length,
-    "Exceptions Found": exceptions.length,
-  };
-
-  const outDir = resolveMerchantOutputPath({ merchantOutputRoot, processor, period });
-  const outFile = path.join(outDir, `${entity} - ${processor} - ${period} - Merchant Recon.xlsx`);
-
-  const wb = await createWorkbookForMerchantReport({
-    entity,
-    period,
-    processor,
-    summary,
-    exceptions,
-  });
-  await wb.xlsx.writeFile(outFile);
-
-  // Return: report path + tickets for Dev tab
-  return {
-    ok: true,
-    reportPath: outFile,
-    tickets: exceptions.map((x) => ({
-      ticket_id: x.ticket_id,
-      entity,
-      period,
-      source: "Merchant",
-      processor,
-      severity: x.severity,
-      issue_code: x.issue_code,
-      message: x.message,
-      amount: x.amount,
-      reference: x.reference,
-      status: "New",
-      created_at: new Date().toLocaleString(),
-    })),
-  };
 });
 
-// -----------------------------
-// Balance Sheet: Save report (Phase 1)
-// -----------------------------
-ipcMain.handle("bs:saveReport", async (_evt, payload) => {
-  const { entity, period, reconName, notes } = payload || {};
-  const settings = store.store;
-  const outDir = resolveBSOutputPath({ balanceSheetOutputRoot: settings.balanceSheetOutputRoot, entity, period });
-  const outFile = path.join(outDir, `${entity} - ${reconName} - ${period}.xlsx`);
-  const wb = await createWorkbookForBalanceSheetReport({ entity, period, reconName, notes });
-  await wb.xlsx.writeFile(outFile);
-  return { ok: true, reportPath: outFile };
+app.on("activate", async () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    await createMainWindow();
+  }
+});
+
+/** -------- Optional IPC helpers (if you want UI to query backend URL) -------- */
+ipcMain.handle("recon:getBaseUrl", async () => {
+  return `http://${API_HOST}:${API_PORT}`;
 });

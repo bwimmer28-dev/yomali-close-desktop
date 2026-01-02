@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
-  installUpdate: () => ipcRenderer.invoke("updates:install"),
+  openFiles: (opts) => ipcRenderer.invoke("dialog:openFiles", opts),
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
 });
