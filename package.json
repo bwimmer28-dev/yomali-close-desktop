@@ -1,10 +1,13 @@
 {
   "name": "yomali-close-desktop",
-  "version": "0.1.17",
+  "version": "0.1.28",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"cd api && uvicorn app:app --reload --port 8000\" \"cd web && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently \"python -m uvicorn recon_backend.api_app:app --reload --port 8080\" \"cd web && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:frontend": "cd web && npm run dev",
+    "dev:backend": "python -m uvicorn recon_backend.api_app:app --reload --port 8080",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
     "build:web": "cd web && npm install && npm run build",
     "dist": "npm run build:web && electron-builder",
     "publish": "npm run build:web && electron-builder --publish always"
@@ -23,13 +26,21 @@
   "build": {
     "appId": "com.stalliant.yomali.close",
     "productName": "Yomali Close",
+    "icon": "build/stalliant.ico",
+    "asar": true,
+    "asarUnpack": [
+      "recon_backend/**/*"
+    ],
     "files": [
       "electron/**/*",
       "web/dist/**/*",
-      "api/**/*"
+      "recon_backend/**/*",
+      "!recon_backend/__pycache__/**/*",
+      "!recon_backend/**/*.pyc"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/stalliant.ico"
     },
     "publish": [
       {

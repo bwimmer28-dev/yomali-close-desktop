@@ -1,7 +1,8 @@
 /* electron/main.js (CommonJS)
    - Starts FastAPI/Uvicorn backend automatically
+   - Checks if backend is already running before starting
    - Restarts backend if it crashes/exits
-   - Waits for /health before loading the UI (optional but recommended)
+   - Waits for /health before loading the UI
 */
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
@@ -11,122 +12,169 @@ const { spawn } = require("child_process");
 let mainWindow = null;
 let pyProc = null;
 let isQuitting = false;
+let backendStartedByUs = false; // Track if WE started the backend
 
 const isDev =
   !app.isPackaged ||
   process.env.NODE_ENV === "development" ||
   process.env.ELECTRON_START_URL?.includes("localhost");
 
+// FIXED: Use port 8080 to match the backend configuration
+const API_HOST = "127.0.0.1";
+const API_PORT = 8080;
+
+const HEALTH_URL = `http://${API_HOST}:${API_PORT}/health`;
+const HEALTH_TIMEOUT_MS = 30_000;
+const HEALTH_INTERVAL_MS = 500;
+
+const RESTART_BASE_DELAY_MS = 2000;
+const RESTART_MAX_DELAY_MS = 15_000;
+
+/** -------- Small helper logger -------- */
 function log(...args) {
   console.log("[main]", ...args);
 }
-function warn(...args) {
-  console.warn("[main]", ...args);
-}
-function err(...args) {
-  console.error("[main]", ...args);
-}
 
-/** -------- Backend config -------- */
-const API_HOST = process.env.RECON_HOST || "127.0.0.1";
-const API_PORT = process.env.RECON_PORT || "8000";
-const HEALTH_URL = `http://${API_HOST}:${API_PORT}/health`;
-
-const BACKEND_IMPORT = process.env.RECON_BACKEND_IMPORT || "recon_backend.api_app:app";
-const BACKEND_HOST = process.env.RECON_BACKEND_HOST || API_HOST;
-const BACKEND_PORT = process.env.RECON_BACKEND_PORT || API_PORT;
-
-// How often we ping /health once running
-const HEALTH_PING_MS = Number(process.env.RECON_HEALTH_PING_MS || 15000);
-
-// Restart backoff (ms)
-const RESTART_BASE_DELAY_MS = Number(process.env.RECON_RESTART_BASE_MS || 2000);
-const RESTART_MAX_DELAY_MS = Number(process.env.RECON_RESTART_MAX_MS || 60000);
-
-/**
- * Where to run the backend from.
- * - In dev, assume repo root is one level up from /electron
- * - In prod, you may need to ship the backend inside resources and point this there.
- */
-function getBackendCwd() {
-  if (!app.isPackaged) {
-    // electron/.. (repo root)
-    return path.join(__dirname, "..");
+/** -------- Check if backend is already running -------- */
+async function isBackendRunning() {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(HEALTH_URL, { signal: controller.signal });
+    clearTimeout(t);
+    return res.ok;
+  } catch (_) {
+    return false;
   }
-  // When packaged: <app>/resources/app.asar (or unpacked)
-  // If you ship backend alongside, adjust this path.
-  // Default: run from resourcesPath (unpacked) or from app.getAppPath().
-  return process.env.RECON_BACKEND_CWD || app.getAppPath();
 }
 
-/**
- * Choose python executable.
- * - Prefer explicit env var if set (useful if you bundle python later)
- * - Else try "python" and fallback to "py" on Windows
- */
-function getPythonCommand() {
-  if (process.env.RECON_PYTHON) return process.env.RECON_PYTHON;
-  if (process.platform === "win32") return "python"; // "py" fallback handled at spawn error
-  return "python3";
+/** -------- Backend spawn / restart -------- */
+async function startBackend() {
+  // First check if backend is already running (e.g., from npm run dev)
+  const alreadyRunning = await isBackendRunning();
+  if (alreadyRunning) {
+    log("Backend already running on port", API_PORT, "- not starting another instance");
+    backendStartedByUs = false;
+    return true;
+  }
+
+  if (pyProc) {
+    log("Backend process already exists");
+    return true;
+  }
+
+  // Determine the correct backend directory
+  // In dev: __dirname is electron/, so parent is project root
+  // In production (packaged): app.getAppPath() returns the .asar, 
+  // but we need the unpacked resources
+  let backendDir;
+  if (app.isPackaged) {
+    // In packaged app, resources are in resources/app.asar.unpacked or next to the exe
+    // Try multiple possible locations
+    const possiblePaths = [
+      path.join(process.resourcesPath, 'app.asar.unpacked'),
+      path.join(process.resourcesPath, 'app'),
+      path.dirname(app.getPath('exe')),
+      path.join(path.dirname(app.getPath('exe')), 'resources', 'app.asar.unpacked'),
+    ];
+    
+    for (const p of possiblePaths) {
+      const testPath = path.join(p, 'recon_backend', 'api_app.py');
+      log("Checking for backend at:", testPath);
+      try {
+        require('fs').accessSync(testPath);
+        backendDir = p;
+        log("Found backend at:", backendDir);
+        break;
+      } catch (_) {
+        // Continue to next path
+      }
+    }
+    
+    if (!backendDir) {
+      log("ERROR: Could not find recon_backend in any expected location");
+      log("Searched paths:", possiblePaths);
+      return false;
+    }
+  } else {
+    // Development mode - use parent of electron/ directory
+    backendDir = path.join(__dirname, "..");
+  }
+
+  const pythonCmd = process.env.YOMALI_PYTHON || "python";
+  const args = ["-m", "uvicorn", "recon_backend.api_app:app", "--host", API_HOST, "--port", String(API_PORT)];
+
+  log("Starting backend:", pythonCmd, args.join(" "), "cwd=", backendDir);
+
+  try {
+    pyProc = spawn(pythonCmd, args, {
+      cwd: backendDir,
+      stdio: "pipe",
+      windowsHide: true,
+      // Ensure Python can find modules
+      env: { ...process.env, PYTHONPATH: backendDir },
+    });
+
+    backendStartedByUs = true;
+
+    pyProc.stdout.on("data", (d) => process.stdout.write(String(d)));
+    pyProc.stderr.on("data", (d) => process.stderr.write(String(d)));
+
+    pyProc.on("error", (err) => {
+      log("Backend spawn error:", err.message);
+      pyProc = null;
+      backendStartedByUs = false;
+    });
+
+    pyProc.on("exit", (code, signal) => {
+      log("Backend exited:", { code, signal });
+      pyProc = null;
+
+      if (isQuitting) return;
+
+      // Only restart if we started it and it wasn't a clean exit
+      if (backendStartedByUs && code !== 0) {
+        setTimeout(async () => {
+          restartDelay = Math.min(restartDelay * 1.5, RESTART_MAX_DELAY_MS);
+          await startBackend();
+        }, restartDelay);
+      }
+    });
+
+    return true;
+  } catch (err) {
+    log("Failed to start backend:", err.message);
+    return false;
+  }
 }
 
-function spawnBackend(pythonCmd) {
-  const cwd = getBackendCwd();
-
-  const args = [
-    "-m",
-    "uvicorn",
-    BACKEND_IMPORT,
-    "--host",
-    String(BACKEND_HOST),
-    "--port",
-    String(BACKEND_PORT),
-  ];
-
-  // If you want live reload in dev, uncomment:
-  // if (!app.isPackaged) args.push("--reload");
-
-  log("Starting backend:", pythonCmd, args.join(" "), "cwd=", cwd);
-
-  const child = spawn(pythonCmd, args, {
-    cwd,
-    env: {
-      ...process.env,
-      // Ensure unbuffered logs so we can see output in real time
-      PYTHONUNBUFFERED: "1",
-    },
-    windowsHide: true,
-  });
-
-  child.stdout.on("data", (d) => log(String(d).trimEnd()));
-  child.stderr.on("data", (d) => warn(String(d).trimEnd()));
-
-  child.on("error", (e) => {
-    err("Backend spawn error:", e?.message || e);
-  });
-
-  return child;
-}
-
-/** -------- Health check helpers -------- */
+/** -------- Health check -------- */
 async function fetchHealth() {
-  // Use global fetch (Node 18+). Electron recent versions include it.
-  const res = await fetch(HEALTH_URL, { method: "GET" });
-  if (!res.ok) throw new Error(`Health not OK: ${res.status}`);
-  const body = await res.json().catch(() => ({}));
-  return body;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(HEALTH_URL, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Health not ok: ${res.status}`);
+    return true;
+  } catch (err) {
+    throw err;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
-async function waitForHealth({ timeoutMs = 30000, intervalMs = 500 } = {}) {
+async function waitForHealth(timeoutMs = HEALTH_TIMEOUT_MS, intervalMs = HEALTH_INTERVAL_MS) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       await fetchHealth();
+      log("Backend is healthy!");
       return true;
     } catch (_) {
       await new Promise((r) => setTimeout(r, intervalMs));
     }
   }
+  log("Backend health check timed out after", timeoutMs, "ms");
   return false;
 }
 
@@ -134,115 +182,50 @@ async function waitForHealth({ timeoutMs = 30000, intervalMs = 500 } = {}) {
 let restartDelay = RESTART_BASE_DELAY_MS;
 let healthPingTimer = null;
 
-function clearHealthPing() {
-  if (healthPingTimer) {
-    clearInterval(healthPingTimer);
-    healthPingTimer = null;
-  }
-}
-
-function startHealthPing() {
-  clearHealthPing();
+function startHealthPinger() {
+  if (healthPingTimer) clearInterval(healthPingTimer);
   healthPingTimer = setInterval(async () => {
     try {
       await fetchHealth();
+      restartDelay = RESTART_BASE_DELAY_MS; // reset backoff when healthy
     } catch (e) {
-      warn("Health ping failed; backend may be down. Scheduling restart.", e?.message || e);
-      scheduleBackendRestart("health_ping_failed");
+      log("Health ping failed:", String(e));
+      // If backend died and we started it, try to restart
+      if (backendStartedByUs && !pyProc && !isQuitting) {
+        log("Attempting to restart backend...");
+        await startBackend();
+      }
     }
-  }, HEALTH_PING_MS);
-}
-
-function scheduleBackendRestart(reason) {
-  if (isQuitting) return;
-
-  // Avoid piling up restarts if we already have a running process
-  if (pyProc && !pyProc.killed) {
-    try {
-      pyProc.kill();
-    } catch (_) {}
-  }
-
-  const delay = Math.min(restartDelay, RESTART_MAX_DELAY_MS);
-  warn(`Restarting backend in ${Math.round(delay / 1000)}s (reason=${reason})`);
-  setTimeout(() => startPythonBackend({ resetBackoff: false }), delay);
-  restartDelay = Math.min(restartDelay * 1.5, RESTART_MAX_DELAY_MS);
-}
-
-async function startPythonBackend({ resetBackoff = true } = {}) {
-  if (isQuitting) return;
-
-  // If already running, don't start again
-  if (pyProc && !pyProc.killed) {
-    return;
-  }
-
-  if (resetBackoff) restartDelay = RESTART_BASE_DELAY_MS;
-
-  clearHealthPing();
-
-  // Try python then fallback to py on Windows if spawn fails quickly
-  const tryCmds = [];
-  const primary = getPythonCommand();
-  tryCmds.push(primary);
-  if (process.platform === "win32" && primary !== "py") tryCmds.push("py");
-
-  let started = false;
-  for (const cmd of tryCmds) {
-    try {
-      pyProc = spawnBackend(cmd);
-      started = true;
-      break;
-    } catch (e) {
-      err("Failed to spawn backend with", cmd, e?.message || e);
-      pyProc = null;
-    }
-  }
-  if (!started || !pyProc) {
-    scheduleBackendRestart("spawn_failed");
-    return;
-  }
-
-  pyProc.on("exit", (code, signal) => {
-    clearHealthPing();
-    pyProc = null;
-    if (isQuitting) return;
-    warn("Backend exited:", { code, signal });
-    scheduleBackendRestart("process_exit");
-  });
-
-  // Optional: wait for health before proceeding
-  const ok = await waitForHealth({ timeoutMs: 45000, intervalMs: 750 });
-  if (!ok) {
-    warn("Backend did not become healthy in time; restarting.");
-    scheduleBackendRestart("health_timeout");
-    return;
-  }
-
-  log("Backend healthy:", HEALTH_URL);
-  startHealthPing();
+  }, 10000); // Check every 10 seconds
 }
 
 /** -------- Window creation -------- */
 async function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    show: false,
+    icon: path.join(__dirname, "..", "build", "stalliant.ico"),
+    width: 1400,
+    height: 900,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
     },
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
-
-  if (isDev && process.env.ELECTRON_START_URL) {
-    await mainWindow.loadURL(process.env.ELECTRON_START_URL);
+  if (isDev) {
+    // In dev, load Vite dev server
+    const url = process.env.ELECTRON_START_URL || "http://localhost:5173";
+    log("Loading dev URL:", url);
+    await mainWindow.loadURL(url);
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    // Adjust if your build output differs
-    await mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+    // In prod, ensure backend is up before loading local UI
+    const ok = await waitForHealth();
+    if (!ok) {
+      dialog.showErrorBox(
+        "Backend did not start",
+        `Could not reach ${HEALTH_URL}.\n\nPlease ensure Python is installed and the backend dependencies are available.\n\nCheck the console for error details.`
+      );
+    }
+    await mainWindow.loadFile(path.join(__dirname, "..", "web", "dist", "index.html"));
   }
 
   mainWindow.on("closed", () => {
@@ -251,26 +234,36 @@ async function createMainWindow() {
 }
 
 /** -------- App lifecycle -------- */
+app.on("ready", async () => {
+  log("App ready, isDev:", isDev);
+  
+  // Start or connect to backend
+  await startBackend();
+  
+  // Wait for backend to be healthy before showing window
+  const healthy = await waitForHealth();
+  if (!healthy) {
+    log("Warning: Backend not healthy, but continuing anyway...");
+  }
+  
+  startHealthPinger();
+  await createMainWindow();
+});
+
 app.on("before-quit", () => {
   isQuitting = true;
-  clearHealthPing();
-  if (pyProc && !pyProc.killed) {
+  if (healthPingTimer) clearInterval(healthPingTimer);
+  
+  // Only kill the backend if we started it
+  if (backendStartedByUs && pyProc) {
+    log("Stopping backend process we started...");
     try {
       pyProc.kill();
     } catch (_) {}
   }
 });
 
-app.whenReady().then(async () => {
-  // 1) Ensure backend is running (and will auto-restart)
-  await startPythonBackend({ resetBackoff: true });
-
-  // 2) Create window
-  await createMainWindow();
-});
-
 app.on("window-all-closed", () => {
-  // On macOS, apps typically stay open until Cmd+Q.
   if (process.platform !== "darwin") {
     app.quit();
   }
@@ -282,7 +275,23 @@ app.on("activate", async () => {
   }
 });
 
-/** -------- Optional IPC helpers (if you want UI to query backend URL) -------- */
+/** -------- Optional IPC helpers -------- */
 ipcMain.handle("recon:getBaseUrl", async () => {
   return `http://${API_HOST}:${API_PORT}`;
+});
+
+/** -------- Folder picker IPC handler -------- */
+ipcMain.handle("dialog:openDirectory", async (event, options = {}) => {
+  const { title = "Select Folder" } = options;
+  
+  const result = await dialog.showOpenDialog({
+    title,
+    properties: ["openDirectory", "createDirectory"],
+  });
+  
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return null;
+  }
+  
+  return result.filePaths[0];
 });

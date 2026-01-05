@@ -1,14 +1,28 @@
 // web/src/App.tsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import MerchantReconciliation from "./MerchantReconciliation";
+import { health, apiStatus, type StatusResponse } from "./lib/reconApi";
 
 type TabKey = "dashboard" | "balance" | "merchant" | "settings" | "help";
+
+type TaskStatus = "Not Started" | "In Progress" | "Complete";
+
+type ChecklistTask = {
+  id: string;
+  name: string;
+  status: TaskStatus;
+};
+
+type EntityChecklist = {
+  entityId: string;
+  period: string;
+  tasks: ChecklistTask[];
+};
 
 type Entity = {
   id: string;
   name: string;
-  status: "On Track" | "At Risk";
-  erp: "QuickBooks" | "NetSuite";
+  erp: "Microsoft Dynamics";
   merchants: string[];
 };
 
@@ -18,22 +32,44 @@ type SettingsState = {
 };
 
 const ENTITIES: Entity[] = [
-  { id: "clickcrm", name: "ClickCRM", status: "On Track", erp: "QuickBooks", merchants: ["PayPal", "Stripe"] },
-  { id: "helpgrid", name: "Helpgrid Inc", status: "At Risk", erp: "NetSuite", merchants: ["Braintree", "Stripe", "NMI"] },
-  { id: "maxweb", name: "Maxweb Inc", status: "On Track", erp: "QuickBooks", merchants: ["PayPal"] },
-  { id: "getpayment", name: "GetPayment", status: "At Risk", erp: "NetSuite", merchants: ["Stripe", "Adyen"] },
-  { id: "smartfluent", name: "SmartFluent", status: "On Track", erp: "QuickBooks", merchants: ["Stripe"] },
-  { id: "yomali-holdings", name: "Yomali Holdings", status: "At Risk", erp: "NetSuite", merchants: ["PayPal", "Braintree"] },
-  { id: "yomali-labs", name: "Yomali Labs", status: "On Track", erp: "QuickBooks", merchants: ["Stripe", "PayPal"] },
+  { id: "clickcrm", name: "ClickCRM", erp: "Microsoft Dynamics", merchants: ["PayPal", "Stripe"] },
+  { id: "helpgrid", name: "Helpgrid Inc", erp: "Microsoft Dynamics", merchants: ["Braintree"] },
+  { id: "maxweb", name: "Maxweb Inc", erp: "Microsoft Dynamics", merchants: ["PayPal"] },
+  { id: "getpayment", name: "GetPayment", erp: "Microsoft Dynamics", merchants: ["Stripe", "Adyen"] },
+  { id: "smartfluent", name: "SmartFluent", erp: "Microsoft Dynamics", merchants: ["Stripe"] },
+  { id: "yomali-holdings", name: "Yomali Holdings", erp: "Microsoft Dynamics", merchants: ["PayPal", "Braintree"] },
+  { id: "yomali-labs", name: "Yomali Labs", erp: "Microsoft Dynamics", merchants: ["Stripe", "PayPal"] },
 ];
 
-const STORAGE_KEY = "stalliant_live_settings_v1";
+const DEFAULT_CHECKLIST_TASKS = [
+  "Review and reconcile bank accounts",
+  "Reconcile credit card accounts",
+  "Review accounts receivable aging",
+  "Review accounts payable aging",
+  "Accrue unbilled revenue",
+  "Accrue expenses",
+  "Review prepaid expenses and amortize",
+  "Review deferred revenue",
+  "Calculate and record depreciation",
+  "Review inventory and record adjustments",
+  "Reconcile payroll liabilities",
+  "Review and accrue bonuses",
+  "Reconcile intercompany accounts",
+  "Review fixed assets and record additions/disposals",
+  "Calculate and record accrued interest",
+  "Review loan balances and schedules",
+  "Prepare journal entries for month-end adjustments",
+  "Review trial balance for unusual items",
+  "Prepare management reports",
+  "Review and finalize close checklist"
+];
+
+const STORAGE_KEY = "yomali_close_settings_v1";
+const CHECKLIST_STORAGE_KEY = "yomali_close_checklists_v1";
 
 declare global {
   interface Window {
     electronAPI?: {
-      checkForUpdates?: () => Promise<any>;
-      installUpdate?: () => Promise<any>;
       pickFolder?: (opts?: { title?: string }) => Promise<string | null>;
     };
   }
@@ -57,12 +93,32 @@ function saveSettings(s: SettingsState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-function statusBadgeClass(status: Entity["status"]) {
-  return status === "On Track" ? "badge badgeGood" : "badge badgeWarn";
+function loadChecklists(): EntityChecklist[] {
+  try {
+    const raw = localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as EntityChecklist[];
+  } catch {
+    return [];
+  }
 }
 
-function statusPillClass(status: Entity["status"]) {
-  return status === "On Track" ? "pill pillGood" : "pill pillWarn";
+function saveChecklists(checklists: EntityChecklist[]) {
+  localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(checklists));
+}
+
+function taskStatusColor(status: TaskStatus): string {
+  switch (status) {
+    case "Complete": return "#10b981";
+    case "In Progress": return "#f59e0b";
+    default: return "#6b7280";
+  }
+}
+
+function getCurrentPeriod(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}`;
 }
 
 export default function App() {
@@ -70,7 +126,12 @@ export default function App() {
   const [activeEntityId, setActiveEntityId] = useState<string>(ENTITIES[0].id);
   const [entitySearch, setEntitySearch] = useState("");
   const [settings, setSettings] = useState<SettingsState>(() => loadSettings());
-  const [updateMsg, setUpdateMsg] = useState<string>("");
+  
+  const [checklists, setChecklists] = useState<EntityChecklist[]>(() => loadChecklists());
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(getCurrentPeriod());
+  
+  const [engineStatus, setEngineStatus] = useState<"Unknown" | "Running" | "Down">("Unknown");
+  const [backendStatus, setBackendStatus] = useState<StatusResponse | null>(null);
 
   const activeEntity = useMemo(
     () => ENTITIES.find((e) => e.id === activeEntityId) || ENTITIES[0],
@@ -85,18 +146,12 @@ export default function App() {
 
   const breadcrumbTitle = useMemo(() => {
     switch (tab) {
-      case "dashboard":
-        return "Dashboard";
-      case "balance":
-        return "Balance Sheet Reconciliation";
-      case "merchant":
-        return "Merchant Reconciliation";
-      case "settings":
-        return "Settings";
-      case "help":
-        return "Help";
-      default:
-        return "Dashboard";
+      case "dashboard": return "Dashboard";
+      case "balance": return "Balance Sheet Reconciliation";
+      case "merchant": return "Merchant Reconciliation";
+      case "settings": return "Settings";
+      case "help": return "Help";
+      default: return "Dashboard";
     }
   }, [tab]);
 
@@ -105,12 +160,100 @@ export default function App() {
     return `Active entity: ${activeEntity.name} • ERP: ${activeEntity.erp}`;
   }, [tab, activeEntity]);
 
+  // Check backend engine status
+  useEffect(() => {
+    async function checkEngine() {
+      try {
+        await health();
+        setEngineStatus("Running");
+        const status = await apiStatus();
+        setBackendStatus(status);
+      } catch {
+        setEngineStatus("Down");
+      }
+    }
+    checkEngine();
+    const interval = setInterval(checkEngine, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  // Get or create checklist for current entity and period
+  const currentChecklist = useMemo(() => {
+    const existing = checklists.find(
+      (c) => c.entityId === activeEntityId && c.period === selectedPeriod
+    );
+    if (existing) return existing;
+    
+    // Create new checklist with default tasks
+    const newChecklist: EntityChecklist = {
+      entityId: activeEntityId,
+      period: selectedPeriod,
+      tasks: DEFAULT_CHECKLIST_TASKS.map((name, idx) => ({
+        id: `task-${idx}`,
+        name,
+        status: "Not Started" as TaskStatus,
+      })),
+    };
+    return newChecklist;
+  }, [checklists, activeEntityId, selectedPeriod]);
+
+  // Calculate checklist progress for all entities
+  const checklistProgress = useMemo(() => {
+    return ENTITIES.map((entity) => {
+      const checklist = checklists.find(
+        (c) => c.entityId === entity.id && c.period === selectedPeriod
+      );
+      if (!checklist) {
+        return { entity: entity.name, total: DEFAULT_CHECKLIST_TASKS.length, complete: 0, inProgress: 0 };
+      }
+      const complete = checklist.tasks.filter((t) => t.status === "Complete").length;
+      const inProgress = checklist.tasks.filter((t) => t.status === "In Progress").length;
+      return { entity: entity.name, total: checklist.tasks.length, complete, inProgress };
+    });
+  }, [checklists, selectedPeriod]);
+
+  function updateTaskStatus(taskId: string, newStatus: TaskStatus) {
+    const updatedChecklists = [...checklists];
+    const checklistIndex = updatedChecklists.findIndex(
+      (c) => c.entityId === activeEntityId && c.period === selectedPeriod
+    );
+
+    if (checklistIndex >= 0) {
+      const taskIndex = updatedChecklists[checklistIndex].tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex >= 0) {
+        updatedChecklists[checklistIndex].tasks[taskIndex].status = newStatus;
+      }
+    } else {
+      // Create new checklist
+      const newChecklist = { ...currentChecklist };
+      const taskIndex = newChecklist.tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex >= 0) {
+        newChecklist.tasks[taskIndex].status = newStatus;
+      }
+      updatedChecklists.push(newChecklist);
+    }
+
+    setChecklists(updatedChecklists);
+    saveChecklists(updatedChecklists);
+  }
+
   async function chooseFolder(which: "balance" | "merchant") {
     const picker = window.electronAPI?.pickFolder;
     if (!picker) {
-      alert("Folder picker is not available (preload/electronAPI missing).");
+      // Fallback to simple prompt if electron API not available
+      const path = prompt(`Enter ${which === "balance" ? "Balance Sheet" : "Merchant Reconciliation"} output folder path:`);
+      if (!path) return;
+      
+      const next: SettingsState =
+        which === "balance"
+          ? { ...settings, balanceSheetOutputDir: path }
+          : { ...settings, merchantReconOutputDir: path };
+
+      setSettings(next);
+      saveSettings(next);
       return;
     }
+    
     const picked = await picker({ title: "Select output folder" });
     if (!picked) return;
 
@@ -123,23 +266,8 @@ export default function App() {
     saveSettings(next);
   }
 
-  async function checkForUpdates() {
-    setUpdateMsg("Checking for updates…");
-    try {
-      const r = await window.electronAPI?.checkForUpdates?.();
-      setUpdateMsg(
-        r?.ok
-          ? "Update check started (see logs). If an update is available it will download."
-          : `Update check failed: ${r?.error || "Unknown error"}`
-      );
-    } catch (e: any) {
-      setUpdateMsg(`Update check failed: ${String(e?.message || e)}`);
-    }
-  }
-
   return (
     <div className="appShell">
-      {/* SIDEBAR */}
       <aside className="sidebar">
         <div className="brand">
           <div className="brandTitle">Yomali Close</div>
@@ -147,7 +275,7 @@ export default function App() {
         </div>
 
         <div className="nav">
-          <div className="navLabel">Navigation</div>
+          <div className="navLabel">NAVIGATION</div>
 
           <button className={`navBtn ${tab === "dashboard" ? "navBtnActive" : ""}`} onClick={() => setTab("dashboard")}>
             <span>Dashboard</span>
@@ -177,7 +305,7 @@ export default function App() {
 
         <div className="entityPanel">
           <div className="entityHeader">
-            <h4>Entities</h4>
+            <h4>ENTITIES</h4>
           </div>
 
           <input
@@ -196,13 +324,11 @@ export default function App() {
                 title={`${e.name} • ${e.erp} • ${e.merchants.join(", ")}`}
               >
                 <span>{e.name}</span>
-                <span className={statusPillClass(e.status)}>{e.status}</span>
               </button>
             ))}
           </div>
 
           <div className="hr" />
-
           <div className="smallNote">
             <div>
               <span className="badge">{activeEntity.erp}</span>
@@ -214,16 +340,11 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN */}
       <main className="main">
         <header className="topbar">
           <div className="breadcrumb">
             <div className="breadcrumbTitle">{breadcrumbTitle}</div>
             <div className="breadcrumbMeta">{breadcrumbMeta}</div>
-          </div>
-
-          <div className="actions">
-            <button className="btn" onClick={checkForUpdates}>Check for Updates</button>
           </div>
         </header>
 
@@ -234,9 +355,8 @@ export default function App() {
                 <div className="cardHeader">
                   <div>
                     <h3 className="cardTitle">Month-End Close Snapshot</h3>
-                    <p className="cardSub">High-level readiness across entities (demo metrics)</p>
+                    <p className="cardSub">High-level readiness across entities</p>
                   </div>
-                  <span className={statusBadgeClass(activeEntity.status)}>{activeEntity.status}</span>
                 </div>
 
                 <div className="cardBody">
@@ -247,11 +367,6 @@ export default function App() {
                       <div className="kpiNote">Balance sheet + merchant workflow</div>
                     </div>
                     <div className="kpi">
-                      <div className="kpiLabel">At Risk</div>
-                      <div className="kpiValue">{ENTITIES.filter((e) => e.status === "At Risk").length}</div>
-                      <div className="kpiNote">Prioritize exceptions + approvals</div>
-                    </div>
-                    <div className="kpi">
                       <div className="kpiLabel">Recon Modules</div>
                       <div className="kpiValue">2</div>
                       <div className="kpiNote">Balance sheet + merchant</div>
@@ -260,32 +375,53 @@ export default function App() {
 
                   <div className="hr" />
 
+                  <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div className="smallNote" style={{ fontWeight: 600 }}>Close Checklist Progress ({selectedPeriod})</div>
+                    <input
+                      type="month"
+                      className="field"
+                      value={selectedPeriod}
+                      onChange={(e) => setSelectedPeriod(e.target.value)}
+                      style={{ maxWidth: 160 }}
+                    />
+                  </div>
+
                   <table className="table">
                     <thead>
                       <tr>
                         <th>Entity</th>
-                        <th>Status</th>
-                        <th>ERP</th>
-                        <th>Merchants</th>
+                        <th>Complete</th>
+                        <th>In Progress</th>
+                        <th>Total Tasks</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {ENTITIES.map((e) => (
-                        <tr key={e.id}>
-                          <td style={{ fontWeight: 600 }}>{e.name}</td>
-                          <td>
-                            <span className={statusBadgeClass(e.status)}>{e.status}</span>
-                          </td>
-                          <td>{e.erp}</td>
-                          <td style={{ color: "var(--muted)" }}>{e.merchants.join(" • ")}</td>
-                        </tr>
-                      ))}
+                      {checklistProgress.map((prog, idx) => {
+                        const entity = ENTITIES[idx];
+                        const percentComplete = Math.round((prog.complete / prog.total) * 100);
+                        return (
+                          <tr key={entity.id}>
+                            <td style={{ fontWeight: 600 }}>{prog.entity}</td>
+                            <td>
+                              <span className="badge" style={{ background: "#10b981", color: "#fff" }}>
+                                {prog.complete} ({percentComplete}%)
+                              </span>
+                            </td>
+                            <td>
+                              <span className="badge" style={{ background: "#f59e0b", color: "#fff" }}>
+                                {prog.inProgress}
+                              </span>
+                            </td>
+                            <td>{prog.total}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
 
                   <div className="hr" />
                   <div className="smallNote">
-                    Merchant reconciliation is now engine-backed (always-on FastAPI service). Use the Merchant tab to view status and trigger runs.
+                    The reconciliation engine runs automatically each night at 2:30 AM EST. Use the Balance Sheet tab to manage close checklists and the Merchant Reconciliation tab to trigger manual runs or download results.
                   </div>
                 </div>
               </div>
@@ -293,7 +429,7 @@ export default function App() {
               <div className="card">
                 <div className="cardHeader">
                   <div>
-                    <h3 className="cardTitle">What’s in this build</h3>
+                    <h3 className="cardTitle">What&apos;s in this build</h3>
                     <p className="cardSub">Current focus areas</p>
                   </div>
                 </div>
@@ -317,57 +453,68 @@ export default function App() {
               <div className="cardHeader">
                 <div>
                   <h3 className="cardTitle">Balance Sheet Reconciliation</h3>
-                  <p className="cardSub">Recon workspace (demo) • Output path is controlled in Settings</p>
+                  <p className="cardSub">Close checklist for {activeEntity.name}</p>
                 </div>
-                <span className={statusBadgeClass(activeEntity.status)}>{activeEntity.status}</span>
               </div>
               <div className="cardBody">
-                <div className="smallNote">
-                  Output folder (from Settings): <b>{settings.balanceSheetOutputDir || "Not set"}</b>
+                <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                  <div className="smallNote" style={{ fontWeight: 600 }}>Period:</div>
+                  <input
+                    type="month"
+                    className="field"
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                    style={{ maxWidth: 160 }}
+                  />
+                  <div className="smallNote" style={{ marginLeft: "auto" }}>
+                    {currentChecklist.tasks.filter(t => t.status === "Complete").length} / {currentChecklist.tasks.length} Complete
+                  </div>
                 </div>
-
-                <div className="hr" />
 
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Account</th>
-                      <th>Expected</th>
-                      <th>Actual</th>
-                      <th>Variance</th>
-                      <th>Resolution</th>
+                      <th style={{ width: "60%" }}>Task</th>
+                      <th>Status</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td>Cash</td>
-                      <td>$1,250,000</td>
-                      <td>$1,246,420</td>
-                      <td>
-                        <span className="badge badgeWarn">-$3,580</span>
-                      </td>
-                      <td>Needs Review</td>
-                    </tr>
-                    <tr>
-                      <td>Accounts Receivable</td>
-                      <td>$980,000</td>
-                      <td>$980,000</td>
-                      <td>
-                        <span className="badge badgeGood">$0</span>
-                      </td>
-                      <td>Resolved</td>
-                    </tr>
-                    <tr>
-                      <td>Accrued Expenses</td>
-                      <td>$410,000</td>
-                      <td>$397,200</td>
-                      <td>
-                        <span className="badge badgeWarn">-$12,800</span>
-                      </td>
-                      <td>Needs Review</td>
-                    </tr>
+                    {currentChecklist.tasks.map((task) => (
+                      <tr key={task.id}>
+                        <td>{task.name}</td>
+                        <td>
+                          <span 
+                            className="badge" 
+                            style={{ 
+                              background: taskStatusColor(task.status),
+                              color: "#fff"
+                            }}
+                          >
+                            {task.status}
+                          </span>
+                        </td>
+                        <td>
+                          <select
+                            className="field"
+                            value={task.status}
+                            onChange={(e) => updateTaskStatus(task.id, e.target.value as TaskStatus)}
+                            style={{ maxWidth: 160 }}
+                          >
+                            <option value="Not Started">Not Started</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Complete">Complete</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
+
+                <div className="hr" />
+                <div className="smallNote">
+                  Use the dropdowns to update task status. Progress is saved automatically and displayed on the Dashboard.
+                </div>
               </div>
             </div>
           )}
@@ -377,13 +524,11 @@ export default function App() {
               <div className="cardHeader">
                 <div>
                   <h3 className="cardTitle">Merchant Reconciliation</h3>
-                  <p className="cardSub">Engine-backed status + manual runs + downloads</p>
+                  <p className="cardSub">Automated reconciliation engine (backend integration)</p>
                 </div>
-                <span className={statusBadgeClass(activeEntity.status)}>{activeEntity.status}</span>
               </div>
 
               <div className="cardBody">
-                {/* The MerchantReconciliation page talks to the always-on FastAPI engine over localhost */}
                 <MerchantReconciliation />
               </div>
             </div>
@@ -391,6 +536,104 @@ export default function App() {
 
           {tab === "settings" && (
             <div className="grid2">
+              <div className="card">
+                <div className="cardHeader">
+                  <div>
+                    <h3 className="cardTitle">Backend Engine Status</h3>
+                    <p className="cardSub">Reconciliation engine health monitor</p>
+                  </div>
+                  <span 
+                    className="badge" 
+                    style={{ 
+                      background: engineStatus === "Running" ? "#10b981" : engineStatus === "Down" ? "#ef4444" : "#6b7280",
+                      color: "#fff"
+                    }}
+                  >
+                    {engineStatus}
+                  </span>
+                </div>
+                <div className="cardBody">
+                  <div className="kpiRow">
+                    <div className="kpi">
+                      <div className="kpiLabel">Service Status</div>
+                      <div className="kpiValue" style={{ fontSize: 18 }}>{engineStatus}</div>
+                      <div className="kpiNote">Health check runs every 30s</div>
+                    </div>
+                    <div className="kpi">
+                      <div className="kpiLabel">Auto-run Time</div>
+                      <div className="kpiValue" style={{ fontSize: 18 }}>
+                        {backendStatus?.settings?.auto_time_et || "2:30 AM ET"}
+                      </div>
+                      <div className="kpiNote">Daily reconciliation</div>
+                    </div>
+                    <div className="kpi">
+                      <div className="kpiLabel">Lookback Days</div>
+                      <div className="kpiValue" style={{ fontSize: 18 }}>
+                        {backendStatus?.settings?.lookback_business_days ?? "3"}
+                      </div>
+                      <div className="kpiNote">Business days</div>
+                    </div>
+                  </div>
+
+                  <div className="hr" />
+
+                  <div className="smallNote" style={{ marginBottom: 8 }}>
+                    <b>Input Files Location</b>
+                  </div>
+                  <div className="smallNote" style={{ 
+                    color: "var(--muted)", 
+                    lineHeight: 1.6,
+                    fontFamily: "monospace",
+                    background: "rgba(0,0,0,0.3)",
+                    padding: 12,
+                    borderRadius: 6,
+                    marginBottom: 12
+                  }}>
+                    {backendStatus?.settings?.input_root || "Not configured"}
+                  </div>
+                  
+                  <div className="smallNote" style={{ marginBottom: 12, lineHeight: 1.6 }}>
+                    The reconciliation engine automatically pulls files from this directory structure each night at 2:30 AM EST. 
+                    Files should be organized as: <strong>[Entity]/[Processor_Folder]/</strong> for processors 
+                    and <strong>[Entity]/[CRM_Folder]/</strong> for CRM files.
+                  </div>
+
+                  <div className="smallNote" style={{ marginBottom: 8 }}>
+                    <b>Expected Folder Structure</b>
+                  </div>
+                  <div style={{
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    background: "rgba(0,0,0,0.3)",
+                    padding: 12,
+                    borderRadius: 6,
+                    lineHeight: 1.8,
+                    color: "var(--muted)"
+                  }}>
+                    {ENTITIES.map((entity, idx) => (
+                      <div key={entity.id} style={{ marginBottom: idx < ENTITIES.length - 1 ? 12 : 0 }}>
+                        <div style={{ color: "#10b981", fontWeight: 600 }}>📁 {entity.name}/</div>
+                        <div style={{ paddingLeft: 20 }}>
+                          <div style={{ color: "#f59e0b" }}>📁 CRM/</div>
+                          {entity.merchants.map(m => (
+                            <div key={m} style={{ color: "#60a5fa" }}>📁 {m}/</div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {engineStatus === "Down" && (
+                    <>
+                      <div className="hr" />
+                      <div className="smallNote" style={{ color: "#ef4444" }}>
+                        <b>⚠️ Engine is Down</b> - The backend reconciliation service is not responding. Please check that the Windows service (NSSM) is running.
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="card">
                 <div className="cardHeader">
                   <div>
@@ -418,23 +661,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              <div className="card">
-                <div className="cardHeader">
-                  <div>
-                    <h3 className="cardTitle">Updates</h3>
-                    <p className="cardSub">Manual fallback if auto-update doesn’t run</p>
-                  </div>
-                </div>
-                <div className="cardBody">
-                  <button className="btn btnPrimary" onClick={checkForUpdates}>Check for Updates</button>
-                  <div style={{ marginTop: 10 }} className="smallNote">{updateMsg || " "}</div>
-                  <div className="hr" />
-                  <div className="smallNote">
-                    If an update downloads, add an “Install update” button that calls <code>electronAPI.installUpdate()</code>.
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -453,29 +679,93 @@ export default function App() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Question</th>
+                      <th style={{ width: "35%" }}>Question</th>
                       <th>Answer</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td>Why does the Merchant tab look different?</td>
-                      <td>Merchant recon moved to an engine-backed dashboard (always-on service). The UI now triggers/monitors runs.</td>
+                      <td>Where do reconciliation outputs go?</td>
+                      <td>Set output folders in <b>Settings</b>. The engine saves daily reconciliation files to the configured Merchant Recon output folder with naming format: <code>entityid_daily_recon_YYYY-MM-DD.xlsx</code></td>
                     </tr>
                     <tr>
-                      <td>Where do exports go?</td>
-                      <td>Set output folders in <b>Settings</b>. Engine outputs are organized by date per entity.</td>
+                      <td>How do I manage the close checklist?</td>
+                      <td>Go to <b>Balance Sheet</b> tab, select your entity and period, then update task statuses as you complete them. Progress is saved automatically.</td>
                     </tr>
                     <tr>
-                      <td>How do I check for updates?</td>
-                      <td>Use <b>Check for Updates</b> in the top bar (or Settings → Updates).</td>
+                      <td>How do I run a manual reconciliation?</td>
+                      <td>Go to <b>Merchant Reconciliation</b> and use &quot;Run Daily Now&quot; for today's date or select a specific date and click &quot;Run for Date&quot;.</td>
+                    </tr>
+                    <tr>
+                      <td>What is the difference between Daily and Monthly runs?</td>
+                      <td><b>Daily</b> reconciles a single business day. <b>Monthly (Super)</b> runs reconciliation for an entire month and generates a comprehensive report.</td>
+                    </tr>
+                    <tr>
+                      <td>When does the automatic reconciliation run?</td>
+                      <td>The engine runs automatically at <b>2:30 AM ET</b> every night and reconciles the previous 3 business days. Check Settings for current schedule.</td>
+                    </tr>
+                    <tr>
+                      <td>What file formats does the engine accept?</td>
+                      <td>The engine accepts <b>CSV</b>, <b>XLSX</b>, and <b>XLS</b> files from payment processors (Stripe, PayPal, Braintree, NMI) and CRM systems.</td>
+                    </tr>
+                    <tr>
+                      <td>How should I organize input files?</td>
+                      <td>Files must be in: <code>[Input Root]/[Entity]/[Processor or CRM]/</code>. Check Settings → Expected Folder Structure for details.</td>
+                    </tr>
+                    <tr>
+                      <td>What does &quot;Missing in CRM&quot; mean?</td>
+                      <td>A transaction exists in the payment processor data but has no corresponding entry in the CRM system. This may indicate a posting delay or missing transaction.</td>
+                    </tr>
+                    <tr>
+                      <td>What does &quot;Missing in Processor&quot; mean?</td>
+                      <td>A transaction exists in CRM but not in processor data. This may indicate a manual journal entry, refund, or data sync issue.</td>
+                    </tr>
+                    <tr>
+                      <td>How do I resolve an exception?</td>
+                      <td>In the Exception Dashboard, check the resolved checkbox and add notes explaining the resolution. Resolved exceptions remain visible but are filtered separately.</td>
+                    </tr>
+                    <tr>
+                      <td>Can I export exceptions to Excel?</td>
+                      <td>Yes, exceptions are included in the reconciliation Excel output. You can also view them in the Exception Dashboard and mark them as resolved.</td>
+                    </tr>
+                    <tr>
+                      <td>What if the backend engine is down?</td>
+                      <td>Check <b>Settings</b> for the engine status. If down, verify the Windows service (NSSM) is running. Contact support if issues persist.</td>
+                    </tr>
+                    <tr>
+                      <td>How do I change the auto-run schedule?</td>
+                      <td>The schedule is configured in the backend settings file. Contact your system administrator to modify auto-run time or lookback days.</td>
+                    </tr>
+                    <tr>
+                      <td>Why is my entity showing &quot;At Risk&quot;?</td>
+                      <td>This is a visual indicator for entities with open exceptions or incomplete close tasks. It's informational only and doesn't affect functionality.</td>
+                    </tr>
+                    <tr>
+                      <td>Can I run multiple reconciliations at once?</td>
+                      <td>No, reconciliations run sequentially to ensure data integrity. Wait for the current run to complete before starting another.</td>
+                    </tr>
+                    <tr>
+                      <td>What happens if a file is missing for a date?</td>
+                      <td>The engine will use the most recent file available before that date. Check the output Excel file's Meta tab to see which files were used.</td>
+                    </tr>
+                    <tr>
+                      <td>How do I update the application?</td>
+                      <td>The app includes an auto-updater. When a new version is available, you'll be prompted to download and install. Updates are deployed via GitHub releases.</td>
+                    </tr>
+                    <tr>
+                      <td>Where are my settings stored?</td>
+                      <td>Settings are stored locally in your browser's localStorage. They persist between sessions but are specific to your machine.</td>
+                    </tr>
+                    <tr>
+                      <td>Who do I contact for support?</td>
+                      <td>Email <b>brent.wimmer@stalliant.com</b> with screenshots, error messages, and steps to reproduce the issue.</td>
                     </tr>
                   </tbody>
                 </table>
 
                 <div className="hr" />
                 <div className="smallNote">
-                  If the Merchant dashboard is blank, check that the backend service is running and that <code>GET /health</code> returns ok.
+                  <b>Pro Tips:</b> Use Ctrl+F to search this FAQ table. The reconciliation engine runs fully automated each night, so ensure your input files are uploaded by 2:00 AM ET. Check the Exception Dashboard regularly to stay on top of discrepancies.
                 </div>
               </div>
             </div>

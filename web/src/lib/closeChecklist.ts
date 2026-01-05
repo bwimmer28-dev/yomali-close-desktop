@@ -1,0 +1,62 @@
+// web/src/lib/closeChecklist.ts
+export type CloseChecklistItem = {
+  id: string;
+  workday: string;
+  category: string;
+  task: string;
+  pic: string;
+};
+
+export const CLOSE_CHECKLIST: CloseChecklistItem[] = [
+  {"id": "t002", "workday": "WD+5", "category": "Adhoc", "task": "Final pay processing / New hire's pay processing", "pic": "Meliza"},
+  {"id": "t003", "workday": "WD-5", "category": "Banking", "task": "Bank categorization - All Banks (partial)", "pic": "Meliza"},
+  {"id": "t004", "workday": "WD+1", "category": "Banking", "task": "Download bank statements: Chase", "pic": "Meliza"},
+  {"id": "t005", "workday": "WD+1", "category": "Banking", "task": "Download bank statements: Paypal", "pic": "Meliza"},
+  {"id": "t006", "workday": "WD+1", "category": "Banking", "task": "Download bank statements: Tipalti", "pic": "Meliza"},
+  {"id": "t007", "workday": "WD+1", "category": "Banking", "task": "Download bank statements: Metropolitan", "pic": "Meliza"},
+  {"id": "t008", "workday": "WD+1", "category": "Banking", "task": "Download bank statements: Bank of America", "pic": "Meliza"},
+  {"id": "t009", "workday": "WD+1", "category": "Banking", "task": "Download merchant statement: Paypal", "pic": "Meliza"},
+  {"id": "t010", "workday": "WD+1", "category": "Banking", "task": "Download merchant statement: Braintree", "pic": "Ledi"},
+  {"id": "t011", "workday": "WD+1", "category": "Banking", "task": "Download merchant statement: Ticksy", "pic": "Ledi"},
+  {"id": "t012", "workday": "WD+1", "category": "Banking", "task": "Bank categorization - All Banks (final)", "pic": "Meliza"},
+  {"id": "t013", "workday": "WD+1 to WD+5", "category": "Accounts Receivable (Debtor)", "task": "Sales invoicing - Inbound", "pic": "Meliza"},
+  {"id": "t014", "workday": "WD+1 to WD+5", "category": "Accounts Receivable (Debtor)", "task": "Sales invoicing - Outbound", "pic": "Meliza"},
+  {"id": "t015", "workday": "WD+4", "category": "Accounts Receivable (Debtor)", "task": "Customer balance review / cash application", "pic": "Ledi"},
+  {"id": "t016", "workday": "WD+1 to WD+5", "category": "Accounts Payable (Creditor)", "task": "Purchase invoicing", "pic": "Meliza/Ledi"},
+  {"id": "t017", "workday": "WD+1 to WD+5", "category": "Accounts Payable (Creditor)", "task": "Rebilling charges processing (AWS)", "pic": "Ledi"},
+  {"id": "t018", "workday": "WD+1 to WD+5", "category": "Accounts Payable (Creditor)", "task": "Balances transfer from YLL rebilling charge processing", "pic": "Meliza"},
+  {"id": "t019", "workday": "WD+4", "category": "Accounts Payable (Creditor)", "task": "HG Old Model - Vendor balance reconciliation", "pic": "Ledi"},
+  {"id": "t020", "workday": "WD+4", "category": "Accounts Payable (Creditor)", "task": "HG New Model - Vendor balance reconciliation", "pic": "Ledi"},
+  {"id": "t021", "workday": "WD+3", "category": "Accounts Payable (Creditor)", "task": "SPI reports reconciliation: HG Old and New model", "pic": "Ledi"},
+  {"id": "t022", "workday": "WD+3", "category": "Accounts Payable (Creditor)", "task": "SPI reports posting journal: HG Old and New model", "pic": "Ledi"},
+  {"id": "t023", "workday": "WD+4", "category": "Accounts Payable (Creditor)", "task": "Vendor balance review / cash application", "pic": "Ledi"},
+  {"id": "t024", "workday": "WD-2", "category": "Accruals", "task": "General accrual releasing", "pic": "Francina"},
+  {"id": "t025", "workday": "WD+5", "category": "Accruals", "task": "General accrual addition", "pic": "Francina"},
+  {"id": "t026", "workday": "WD+4", "category": "Accruals", "task": "Rebate accrual", "pic": "Ledi"},
+  {"id": "t027", "workday": "WD+5", "category": "Accruals", "task": "Commissions accrual", "pic": "Meliza"},
+  {"id": "t028", "workday": "WD+5", "category": "Accruals", "task": "New hire's pay accrual", "pic": "Meliza"},
+  {"id": "t029", "workday": "WD+1", "category": "Accruals", "task": "Merchant fees accrual", "pic": "Ledi"},
+  {"id": "t030", "workday": "WD-2", "category": "Prepayments", "task": "General prepayment releasing", "pic": "Francina"},
+  {"id": "t031", "workday": "WD+5", "category": "Prepayments", "task": "General prepayment addition", "pic": "Francina"},
+  {"id": "t032", "workday": "WD+5", "category": "Prepayments", "task": "Other prepaid expense journal entry (petty cash)", "pic": "Ledi"},
+  {"id": "t033", "workday": "WD+3", "category": "General Ledger", "task": "Allowance Reserve Reclass - HelpGrid Affiliates new model and old model journal", "pic": "Ledi"},
+  {"id": "t034", "workday": "WD+4", "category": "General Ledger", "task": "Reclass OB to IB - CS Order Taking Revenue", "pic": "Meliza"},
+  {"id": "t035", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - All bank accounts", "pic": "Meliza"},
+  {"id": "t036", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Prepayments", "pic": "Francina"},
+  {"id": "t037", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Accruals", "pic": "Francina"},
+  {"id": "t038", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Merchant accounts", "pic": "Ledi"},
+  {"id": "t039", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Advances", "pic": "Lorena"},
+  {"id": "t040", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Debtors & creditors", "pic": "Francina"},
+  {"id": "t041", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Allowances", "pic": "Ledi"},
+  {"id": "t042", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Accrued rebates", "pic": "Ledi"},
+  {"id": "t043", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Sales taxes account", "pic": "Ledi"},
+  {"id": "t044", "workday": "WD+5", "category": "General Ledger", "task": "Balance sheet reconcilation / related adjustments journal postings - Petty cash account", "pic": "Ledi"},
+  {"id": "t045", "workday": "WD+5", "category": "General Ledger", "task": "Profit/Loss analysis / any adjustments needed", "pic": "Francina"},
+  {"id": "t046", "workday": "WD+5", "category": "General Ledger", "task": "Intercompany Reconciliation (entity-entity match-off)", "pic": "Ledi"},
+  {"id": "t047", "workday": "WD+5", "category": "General Ledger", "task": "Reclass blank division codes to IB/OB", "pic": "Ledi"},
+  {"id": "t048", "workday": "WD+5", "category": "General Ledger", "task": "Service invoice income", "pic": "Ledi"},
+  {"id": "t049", "workday": "WD+6", "category": "General Ledger", "task": "Final P&L & Accounts Update", "pic": "Dane"},
+  {"id": "t050", "workday": "WD+6", "category": "General Ledger", "task": "Individual Management Accounts Prep and Submission", "pic": "Dane"},
+  {"id": "t051", "workday": "Depends on state", "category": "VAT", "task": "Sales tax filing", "pic": "TBA"},
+  {"id": "t052", "workday": "Depends on state", "category": "VAT", "task": "Federal tax", "pic": "TBA"},
+];
