@@ -3,6 +3,50 @@
 
 export const API_BASE = "http://127.0.0.1:8080";
 
+// ============================================================================
+// Resolution Status Types and Helpers
+// ============================================================================
+
+export type ResolutionStatus = "needs_review" | "in_progress" | "resolved" | "approved_variance";
+
+export function formatReasonCode(code: string): string {
+  if (!code) return "Unknown";
+  return code
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export function formatResolutionStatus(status: ResolutionStatus | string): string {
+  switch (status) {
+    case "needs_review": return "Needs Review";
+    case "in_progress": return "In Progress";
+    case "resolved": return "Resolved";
+    case "approved_variance": return "Approved Variance";
+    default: return status || "Unknown";
+  }
+}
+
+export function getStatusColor(status: ResolutionStatus | string): string {
+  switch (status) {
+    case "needs_review": return "#f59e0b"; // amber
+    case "in_progress": return "#3b82f6"; // blue
+    case "resolved": return "#10b981"; // green
+    case "approved_variance": return "#8b5cf6"; // purple
+    default: return "#6b7280"; // gray
+  }
+}
+
+export function getStatusBgColor(status: ResolutionStatus | string): string {
+  switch (status) {
+    case "needs_review": return "rgba(245, 158, 11, 0.15)";
+    case "in_progress": return "rgba(59, 130, 246, 0.15)";
+    case "resolved": return "rgba(16, 185, 129, 0.15)";
+    case "approved_variance": return "rgba(139, 92, 246, 0.15)";
+    default: return "rgba(107, 114, 128, 0.15)";
+  }
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) {
@@ -27,10 +71,15 @@ export type EngineSettings = {
 };
 
 export type EntityRunStatus = {
-  name: string;
-  last_daily?: string | null;
-  last_super?: string | null;
-  file_count?: number;
+  entity: string;
+  entity_id?: string;
+  lastDailyAt?: string | null;
+  lastDailyOutputPath?: string | null;
+  lastDailyOk?: boolean | null;
+
+  lastSuperAt?: string | null;
+  lastSuperOutputPath?: string | null;
+  lastSuperOk?: boolean | null;
 };
 
 export type StatusResponse = {
@@ -39,129 +88,31 @@ export type StatusResponse = {
 };
 
 export type RunResponse = {
-  ok?: boolean;
+  ok: boolean;
   skipped?: boolean;
-  reason?: string;
-  entity_id: string;
-  date: string;
-  download_token?: string;
-  output_file?: string;
-  status_summary?: StatusSummary;
-  daily_statuses?: DailyStatus[];
-  exceptions?: ExceptionRow[];
-  counts?: { summary_rows: number; exceptions_rows: number };
-  meta?: Record<string, any>;
+  message?: string;
+  outputPath?: string;
 };
 
-export type HealthResponse = { ok: boolean; status?: string };
-
-// ============================================================================
-// New v2 Types - Traffic Light Status
-// ============================================================================
-
-export type ReconciliationStatus = "green" | "yellow" | "red";
-
-export type ReasonCode = 
-  | "within_tolerance"
-  | "timing_cutoff"
-  | "payout_in_transit"
-  | "refund_failure"
-  | "void_vs_refund"
-  | "auth_not_captured"
-  | "processor_only"
-  | "spi_only"
-  | "adjustment_no_spi"
-  | "dispute_lifecycle"
-  | "fee_variance"
-  | "data_missing"
-  | "unexplained";
-
-export type ResolutionStatus = 
-  | "needs_review"
-  | "in_progress"
-  | "resolved"
-  | "approved_variance";
-
-export type StatusSummary = {
-  total_processors: number;
-  green_count: number;
-  yellow_count: number;
-  red_count: number;
-  total_variance: number;
-  total_exceptions: number;
-};
-
-export type VarianceBreakdown = {
-  timing_cutoff: number;
-  refund_failure: number;
-  void_vs_refund: number;
-  processor_only: number;
-  spi_only: number;
-  adjustments: number;
-  disputes: number;
-  fees: number;
-  unexplained: number;
-};
-
-export type DailyStatus = {
-  date: string;
-  entity_id: string;
-  processor: string;
-  spi_charge_gross: number;
-  spi_refund_gross: number;
-  spi_refund_failure_gross: number;
-  spi_target_gross: number;
-  spi_charge_count: number;
-  spi_refund_count: number;
-  proc_charge_gross: number;
-  proc_refund_gross: number;
-  proc_fee_amount: number;
-  proc_target_gross: number;
-  proc_charge_count: number;
-  proc_refund_count: number;
-  variance_amount: number;
-  variance_pct: number;
-  status: ReconciliationStatus;
-  top_reason_code: ReasonCode;
-  reason_codes?: ReasonCode[];
-  variance_breakdown?: VarianceBreakdown;
-  spi_data_present: boolean;
-  proc_data_present: boolean;
-};
-
-// ============================================================================
-// Exception Types (v2 - reason code based)
-// ============================================================================
+export type HealthResponse = { ok: boolean };
 
 export type Exception = {
   id: string;
   entity_id: string;
-  date: string;
-  period: string;
-  processor: string;
-  reason_code: ReasonCode;
-  amount: number;
-  direction: "spi_only" | "processor_only" | "mismatch";
-  item_count: number;
-  resolution_status: ResolutionStatus;
-  resolved_by?: string | null;
-  resolved_at?: string | null;
-  notes: string;
-};
-
-export type ExceptionRow = {
-  date: string;
-  processor: string;
-  reason_code: string;
-  amount: number;
-  direction: string;
-  status: string;
+  merchant: string;
+  date: string; // ISO date string
+  period: string; // YYYY-MM
+  processor_total: number;
+  crm_total: number;
+  diff: number;
+  status: "Missing in CRM" | "Missing in Processor" | "Needs Review";
+  resolved: boolean;
+  notes?: string;
 };
 
 export type ExceptionUpdate = {
-  resolution_status?: ResolutionStatus;
+  resolved?: boolean;
   notes?: string;
-  resolved_by?: string;
 };
 
 export type ExceptionsResponse = {
@@ -171,12 +122,9 @@ export type ExceptionsResponse = {
 
 export type ExceptionStatsResponse = {
   total_exceptions: number;
-  needs_review: number;
-  in_progress: number;
-  resolved: number;
-  approved_variance: number;
+  open_exceptions: number;
+  resolved_exceptions: number;
   total_open_amount: number;
-  by_reason_code: Record<string, { count: number; amount: number }>;
   by_period: Record<string, { total: number; open: number; resolved: number }>;
 };
 
@@ -199,11 +147,10 @@ export async function runDaily(entityId: string, date?: string, force?: boolean)
   if (date) {
     p.set("date_str", date);
   }
-  // Always save to disk
-  p.set("save", "true");
-  // Force re-run even if file exists
-  if (force) {
-    p.set("force", "true");
+  // Note: 'save' parameter controls whether to save output
+  // If force=true, we set save=false to skip the "already ran" check
+  if (force !== undefined) {
+    p.set("save", force ? "false" : "true");
   }
   return jsonFetch<RunResponse>(`${API_BASE}/run/daily?${p.toString()}`, { method: "POST" });
 }
@@ -235,14 +182,12 @@ export async function downloadLastXlsx(entityId: string): Promise<Blob> {
 export async function getExceptions(params?: {
   entity_id?: string;
   period?: string;
-  resolution_status?: ResolutionStatus;
-  reason_code?: ReasonCode;
+  resolved?: boolean;
 }): Promise<ExceptionsResponse> {
   const p = new URLSearchParams();
   if (params?.entity_id) p.set("entity_id", params.entity_id);
   if (params?.period) p.set("period", params.period);
-  if (params?.resolution_status) p.set("resolution_status", params.resolution_status);
-  if (params?.reason_code) p.set("reason_code", params.reason_code);
+  if (params?.resolved !== undefined) p.set("resolved", String(params.resolved));
   
   return jsonFetch<ExceptionsResponse>(`${API_BASE}/exceptions?${p.toString()}`, {
     method: "GET",
@@ -259,7 +204,7 @@ export async function getException(exceptionId: string): Promise<Exception> {
 }
 
 /**
- * Update an exception's resolution status or notes
+ * Update an exception's resolved status or notes
  */
 export async function updateException(
   exceptionId: string,
@@ -283,20 +228,6 @@ export async function deleteException(exceptionId: string): Promise<{ deleted: b
 }
 
 /**
- * Clear all exceptions (requires confirm=true)
- */
-export async function clearExceptions(entityId?: string): Promise<{ cleared: boolean; entity_id: string }> {
-  const p = new URLSearchParams();
-  p.set("confirm", "true");
-  if (entityId) p.set("entity_id", entityId);
-  
-  return jsonFetch<{ cleared: boolean; entity_id: string }>(
-    `${API_BASE}/exceptions?${p.toString()}`,
-    { method: "DELETE" }
-  );
-}
-
-/**
  * Get exception statistics
  */
 export async function getExceptionStats(entityId?: string): Promise<ExceptionStatsResponse> {
@@ -306,57 +237,6 @@ export async function getExceptionStats(entityId?: string): Promise<ExceptionSta
   return jsonFetch<ExceptionStatsResponse>(`${API_BASE}/exceptions/stats?${p.toString()}`, {
     method: "GET",
   });
-}
-
-// ============================================================================
-// Helper functions for display
-// ============================================================================
-
-export function getStatusColor(status: ReconciliationStatus): string {
-  switch (status) {
-    case "green": return "#10b981";
-    case "yellow": return "#f59e0b";
-    case "red": return "#ef4444";
-    default: return "#6b7280";
-  }
-}
-
-export function getStatusBgColor(status: ReconciliationStatus): string {
-  switch (status) {
-    case "green": return "#064e3b";
-    case "yellow": return "#78350f";
-    case "red": return "#7f1d1d";
-    default: return "#374151";
-  }
-}
-
-export function formatReasonCode(code: ReasonCode | string): string {
-  const labels: Record<string, string> = {
-    within_tolerance: "Within Tolerance",
-    timing_cutoff: "Timing Cutoff",
-    payout_in_transit: "Payout In Transit",
-    refund_failure: "Refund Failure",
-    void_vs_refund: "Void vs Refund",
-    auth_not_captured: "Auth Not Captured",
-    processor_only: "Processor Only",
-    spi_only: "SPI Only",
-    adjustment_no_spi: "Adjustment (No SPI)",
-    dispute_lifecycle: "Dispute Lifecycle",
-    fee_variance: "Fee Variance",
-    data_missing: "Data Missing",
-    unexplained: "Unexplained",
-  };
-  return labels[code] || code;
-}
-
-export function formatResolutionStatus(status: ResolutionStatus | string): string {
-  const labels: Record<string, string> = {
-    needs_review: "Needs Review",
-    in_progress: "In Progress",
-    resolved: "Resolved",
-    approved_variance: "Approved",
-  };
-  return labels[status] || status;
 }
 
 // ============================================================================
@@ -425,4 +305,27 @@ export async function downloadXlsx(downloadToken: string): Promise<Blob> {
     }
   }
   throw new Error("Download endpoint not available (no matching /download route).");
+}
+
+// ============================================================================
+// Settings Management
+// ============================================================================
+
+export type SettingsUpdate = {
+  output_dir?: string;
+  input_root?: string;
+  auto_enabled?: boolean;
+  auto_time_et?: string;
+  lookback_business_days?: number;
+};
+
+/**
+ * Update backend settings (output path, input path, etc.)
+ */
+export async function updateSettings(updates: SettingsUpdate): Promise<{ ok: boolean; settings: EngineSettings }> {
+  return jsonFetch<{ ok: boolean; settings: EngineSettings }>(`${API_BASE}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
 }

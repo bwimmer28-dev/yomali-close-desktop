@@ -1,7 +1,7 @@
 // web/src/App.tsx
 import React, { useMemo, useState, useEffect } from "react";
 import MerchantReconciliation from "./MerchantReconciliation";
-import { health, apiStatus, type StatusResponse } from "./lib/reconApi";
+import { health, apiStatus, updateSettings, type StatusResponse } from "./lib/reconApi";
 
 type TabKey = "dashboard" | "balance" | "merchant" | "settings" | "help";
 
@@ -177,6 +177,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Sync local settings to backend on startup
+  useEffect(() => {
+    async function syncSettingsToBackend() {
+      if (settings.merchantReconOutputDir) {
+        try {
+          await updateSettings({ output_dir: settings.merchantReconOutputDir });
+          console.log("[Settings] Synced output_dir to backend:", settings.merchantReconOutputDir);
+        } catch (err) {
+          console.error("[Settings] Failed to sync settings to backend:", err);
+        }
+      }
+    }
+    // Only sync after engine is confirmed running
+    if (engineStatus === "Running") {
+      syncSettingsToBackend();
+    }
+  }, [engineStatus, settings.merchantReconOutputDir]);
+
   // Get or create checklist for current entity and period
   const currentChecklist = useMemo(() => {
     const existing = checklists.find(
@@ -251,6 +269,16 @@ export default function App() {
 
       setSettings(next);
       saveSettings(next);
+      
+      // Update backend settings for merchant recon output
+      if (which === "merchant") {
+        try {
+          await updateSettings({ output_dir: path });
+          console.log("[Settings] Updated backend output_dir to:", path);
+        } catch (err) {
+          console.error("[Settings] Failed to update backend:", err);
+        }
+      }
       return;
     }
     
@@ -264,6 +292,16 @@ export default function App() {
 
     setSettings(next);
     saveSettings(next);
+    
+    // Update backend settings for merchant recon output
+    if (which === "merchant") {
+      try {
+        await updateSettings({ output_dir: picked });
+        console.log("[Settings] Updated backend output_dir to:", picked);
+      } catch (err) {
+        console.error("[Settings] Failed to update backend:", err);
+      }
+    }
   }
 
   return (
