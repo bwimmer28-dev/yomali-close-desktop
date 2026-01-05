@@ -268,6 +268,14 @@ def health():
     return {"ok": True, "status": "running"}
 
 
+class SettingsUpdate(BaseModel):
+    output_dir: Optional[str] = None
+    input_root: Optional[str] = None
+    auto_enabled: Optional[bool] = None
+    auto_time_et: Optional[str] = None
+    lookback_business_days: Optional[int] = None
+
+
 @app.get("/status")
 def status():
     """Get status of all entities and settings"""
@@ -280,6 +288,52 @@ def status():
             "output_dir": _settings.output_dir,
         },
         "entities": status_from_output_dir(_settings),
+    }
+
+
+@app.patch("/settings")
+def update_settings(updates: SettingsUpdate):
+    """Update backend settings"""
+    global _settings, EXCEPTIONS_FILE
+    
+    # Create a dict of current settings
+    current = {
+        "entities": _settings.entities,
+        "input_root": _settings.input_root,
+        "output_dir": _settings.output_dir,
+        "auto_enabled": _settings.auto_enabled,
+        "auto_time_et": _settings.auto_time_et,
+        "lookback_business_days": _settings.lookback_business_days,
+    }
+    
+    # Apply updates
+    if updates.output_dir is not None:
+        current["output_dir"] = updates.output_dir
+        # Update exceptions file path too
+        EXCEPTIONS_FILE = Path(updates.output_dir) / "exceptions.json"
+        print(f"[OK] Updated output_dir to: {updates.output_dir}")
+    if updates.input_root is not None:
+        current["input_root"] = updates.input_root
+        print(f"[OK] Updated input_root to: {updates.input_root}")
+    if updates.auto_enabled is not None:
+        current["auto_enabled"] = updates.auto_enabled
+    if updates.auto_time_et is not None:
+        current["auto_time_et"] = updates.auto_time_et
+    if updates.lookback_business_days is not None:
+        current["lookback_business_days"] = updates.lookback_business_days
+    
+    # Create new settings object
+    _settings = ReconSettings(**current)
+    
+    return {
+        "ok": True,
+        "settings": {
+            "auto_enabled": _settings.auto_enabled,
+            "auto_time_et": _settings.auto_time_et,
+            "lookback_business_days": _settings.lookback_business_days,
+            "input_root": _settings.input_root,
+            "output_dir": _settings.output_dir,
+        }
     }
 
 
